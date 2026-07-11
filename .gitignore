@@ -1,3 +1,27 @@
+# Build output
 /target
-/evidence
 /trailtransfer
+/dist
+*.exe
+
+# Local runtime evidence journals
+/evidence
+*.jsonl
+
+# Local secrets & config (ship only *.example)
+.env
+.env.*
+!.env.example
+*.key
+rclone.conf
+config.yaml
+
+# IDE / editor metadata
+.idea/
+.vscode/
+.claude/settings.local.json
+*.iml
+*.swp
+
+# OS cruft
+.DS_Store
