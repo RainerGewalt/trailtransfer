@@ -1,0 +1,51 @@
+name: Bug report
+description: Report incorrect or unexpected worker behavior
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Do not include secrets** (broker passwords,
+        `rclone.conf` contents, cloud credentials). For security vulnerabilities,
+        use a private advisory instead — see SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you observe, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Include the command JSON you published (with secrets removed) and the topics you observed.
+      placeholder: |
+        1. Policy: …
+        2. Published to trailtransfer/worker-01/commands: { … }
+        3. Observed on …/result: { … }
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Relevant events / journal excerpt
+      description: Status/result event or `trailtransfer verify` output. Redact secrets.
+      render: json
+  - type: input
+    id: version
+    attributes:
+      label: TrailTransfer version
+      description: From `trailtransfer version` or the container tag.
+    validations:
+      required: true
+  - type: input
+    id: rclone-version
+    attributes:
+      label: rclone version
+      description: From `rclone version` (reported in capabilities/result).
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS/arch, Docker vs. binary, broker (Mosquitto/other).

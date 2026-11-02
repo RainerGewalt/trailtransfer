@@ -1,0 +1,38 @@
+name: Feature request
+description: Propose a change within TrailTransfer's scope
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        TrailTransfer has a deliberately narrow scope. Please read
+        `docs/PRODUCT_MODEL.md` and the non-goals in `CONTRIBUTING.md` first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What operational problem are you trying to solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope fit
+      description: A change belongs in the core only if it improves at least one of these.
+      options:
+        - label: Improves controllability (policy / safe command handling)
+        - label: Improves security (containment, least privilege, no new attack surface)
+        - label: Improves provability (evidence, verification, traceability)
+  - type: checkboxes
+    id: non-goals
+    attributes:
+      label: Confirm it is not a non-goal
+      options:
+        - label: This is not a web UI, scheduler, remote shell, arbitrary rclone flags, custom transfer backend, embedded broker, required cloud/TrailMQ dependency, or generic file/delete surface.
+          required: true
