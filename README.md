@@ -2,6 +2,11 @@
 
 **MQTT-controlled rclone worker for audit-ready edge file transfers.**
 
+[![CI](https://github.com/RainerGewalt/FileFlux/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/RainerGewalt/FileFlux/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/RainerGewalt/trailtransfer.svg)](https://pkg.go.dev/github.com/RainerGewalt/trailtransfer)
+[![GHCR image](https://img.shields.io/badge/ghcr.io-trailtransfer-1f6feb?logo=docker&logoColor=white)](https://github.com/RainerGewalt/FileFlux/pkgs/container/trailtransfer)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 TrailTransfer lets edge machines execute file-transfer jobs without exposing an
 HTTP API, opening SSH, or relying on invisible cron scripts. Jobs arrive over
 **MQTT**, are validated against a local **policy**, executed through **rclone**,
@@ -11,7 +16,8 @@ TrailTransfer does **not** replace rclone — rclone stays the transfer engine.
 TrailTransfer is the MQTT control plane, policy layer, job manager and evidence
 wrapper around it.
 
-> Works with any MQTT broker. Best with TrailMQ.
+> Works with any MQTT broker. TrailMQ can add fleet governance, contracts and
+> centralized evidence — but is never required.
 
 ```
 MQTT command in
@@ -34,6 +40,23 @@ runner · an audit-ready job executor · a TrailMQ-native worker.
 
 **It is not:** a replacement for rclone · a remote shell · an unrestricted file
 manager · an enterprise MFT suite · a cloud service.
+
+## Why not just cron + rclone, or SSH?
+
+- **vs. cron + rclone:** cron scripts run silently, accept whatever flags the
+  script author wrote, and leave no trustworthy record of *what actually ran*.
+  TrailTransfer validates every job against a local policy, forbids arbitrary
+  rclone flags, and seals each outcome — success **or** rejection — into a
+  tamper-evident, independently verifiable evidence record.
+- **vs. SSH / remote shell:** a shell on an edge box is unlimited authority.
+  TrailTransfer exposes **no inbound port** and **no shell**; it holds a single
+  outbound MQTT connection and only ever runs a fixed, allowlisted rclone action
+  built as an argument vector — never a shell string.
+- **What you can prove:** for every job — which action, with which policy
+  (`policy_hash`), from where to where, its rclone exit code and counters,
+  chained to the previous record. Per-file content manifests and trusted
+  timestamps remain future assurance work; see
+  [the evidence model](docs/EVIDENCE_MODEL.md) for the current boundary.
 
 ## Quickstart
 
@@ -206,6 +229,14 @@ go test ./...
   non-repudiation. *(this)*
 - **next** — RFC 3161 timestamps, file manifest, WORM export, live progress, retries.
 - **v1.0** — stable schemas, hardened image, full CI, deployment/validation guide.
+
+## Contributing
+
+Contributions are welcome within TrailTransfer's deliberately narrow scope. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for local setup, the hard security rules and
+commit conventions, [`CHANGELOG.md`](CHANGELOG.md) for the release history, and
+[`docs/`](docs/) for the architecture, policy, MQTT contract and evidence model.
+Report vulnerabilities privately per [`SECURITY.md`](SECURITY.md).
 
 ## License
 
