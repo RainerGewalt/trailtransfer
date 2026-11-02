@@ -7,11 +7,9 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Nothing yet. The section below is prepared for the first tag and becomes
-`[0.1.0] - 2026-11-02` when the tag is created; see
-[`docs/RELEASE_0.1.0_CHECKLIST.md`](docs/RELEASE_0.1.0_CHECKLIST.md).
+Nothing yet.
 
-## [Unreleased → 0.1.0] - 2026-11-02 (prepared, not yet tagged)
+## [0.1.0] - 2026-11-02
 
 First release of TrailTransfer, the Go successor of FileFlux.
 
@@ -82,4 +80,5 @@ First release of TrailTransfer, the Go successor of FileFlux.
   trusted time and key management remain operator responsibilities. No GxP,
   Part 11 or certification claim is made.
 
-[Unreleased]: https://github.com/RainerGewalt/trailtransfer/compare/main...HEAD
+[Unreleased]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/RainerGewalt/trailtransfer/releases/tag/v0.1.0
