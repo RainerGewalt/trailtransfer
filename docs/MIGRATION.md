@@ -50,8 +50,21 @@ so renaming the repo to `trailtransfer` is the one remaining external step.
 
 ## Open points
 
-- Rename the GitHub repository `FileFlux` → `trailtransfer`.
-- `docs/CONCEPT.md` still contains Rust-worded passages (§1/§7/§16) — de-Rust it.
-- Live progress parsing, retries and dead-letter events are v0.2.
-- `.idea/` IDE files and the old `create_sftp_test_cases.sh` demo helper were
-  left untouched.
+- Rename the GitHub repository `FileFlux` → `trailtransfer` (the Go module is
+  already `github.com/RainerGewalt/trailtransfer`).
+- Harden transfer authorization with policy-owned routes, explicit destructive
+  action guards, and component-aware local and remote containment.
+- Persist job-ID deduplication and terminal-result delivery across worker and
+  broker restarts.
+- Add stronger evidence levels, file manifests, trusted timestamps, and
+  immutable external retention as later, separately reviewed work.
+
+## Done since the initial migration
+
+- `docs/CONCEPT.md` and `docs/ARCHITECTURE.md` de-Rusted; ARCHITECTURE now
+  describes the current architecture instead of a migration blueprint.
+- Untracked `.env` (only `.env.example` ships) and `.idea/` editor metadata,
+  including `super-fast-smb-image-uploader.iml`; removed both copies of the
+  stale `create_sftp_test_cases.sh` helper.
+- Added `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, GitHub
+  issue/PR templates, `docs/RELEASE.md`, and a `Makefile`.
