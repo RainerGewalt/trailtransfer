@@ -39,7 +39,7 @@ check or decide by hand before `git tag -a v0.1.0`; the generic procedure is in
 
 ## 3. Repository identity
 
-- [ ] Repository rename `FileFlux` → `trailtransfer` is the owner's decision.
+- [x] Repository renamed `FileFlux` → `trailtransfer` on 2026-11-02.
       The Go module path is already `github.com/RainerGewalt/trailtransfer`,
       so `go install` and the pkg.go.dev badge only work after the rename (or
       with a redirect). If the repository stays `FileFlux`, change the module

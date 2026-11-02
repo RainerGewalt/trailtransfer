@@ -2,7 +2,7 @@ name: Pull Request Policy
 
 on:
   pull_request:
-    branches: [master, staging]
+    branches: [main]
     types: [opened, reopened, synchronize, edited, ready_for_review]
 
 permissions:

@@ -2,9 +2,9 @@
 
 **MQTT-controlled rclone worker for audit-ready edge file transfers.**
 
-[![CI](https://github.com/RainerGewalt/FileFlux/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/RainerGewalt/FileFlux/actions/workflows/ci.yml)
+[![CI](https://github.com/RainerGewalt/trailtransfer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/RainerGewalt/trailtransfer/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/RainerGewalt/trailtransfer.svg)](https://pkg.go.dev/github.com/RainerGewalt/trailtransfer)
-[![GHCR image](https://img.shields.io/badge/ghcr.io-trailtransfer-1f6feb?logo=docker&logoColor=white)](https://github.com/RainerGewalt/FileFlux/pkgs/container/trailtransfer)
+[![GHCR image](https://img.shields.io/badge/ghcr.io-trailtransfer-1f6feb?logo=docker&logoColor=white)](https://github.com/RainerGewalt/trailtransfer/pkgs/container/trailtransfer)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 TrailTransfer lets edge machines execute file-transfer jobs without exposing an

@@ -82,4 +82,4 @@ First release of TrailTransfer, the Go successor of FileFlux.
   trusted time and key management remain operator responsibilities. No GxP,
   Part 11 or certification claim is made.
 
-[Unreleased]: https://github.com/RainerGewalt/FileFlux/compare/master...HEAD
+[Unreleased]: https://github.com/RainerGewalt/trailtransfer/compare/main...HEAD

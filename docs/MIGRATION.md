@@ -38,7 +38,7 @@ rename during this task: `TRAILTRANSFER_RCLONE_PATH` → `TRAILTRANSFER_RCLONE_B
 
 `FileFlux/fileflux/FILEFLUX` → `TrailTransfer/trailtransfer/TRAILTRANSFER` across
 code, README, docs, Docker, compose, CI, examples and MQTT topics. The GitHub
-repo is still named `FileFlux`; the Go module is `github.com/RainerGewalt/trailtransfer`,
+repository was renamed to `trailtransfer` on 2026-11-02; the Go module is `github.com/RainerGewalt/trailtransfer`,
 so renaming the repo to `trailtransfer` is the one remaining external step.
 
 ## Removed / archived
@@ -79,7 +79,7 @@ never verify.
 
 ## Open points
 
-- Rename the GitHub repository `FileFlux` → `trailtransfer` (the Go module is
+- Done 2026-11-02: GitHub repository renamed `FileFlux` → `trailtransfer` (the Go module is
   already `github.com/RainerGewalt/trailtransfer`).
 - Harden transfer authorization with policy-owned routes, explicit destructive
   action guards, and component-aware local and remote containment.
