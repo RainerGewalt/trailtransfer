@@ -78,19 +78,19 @@ func (m *Manager) Handle(payload []byte) {
 
 	if dec := m.pol.Evaluate(cmd); !dec.Allowed {
 		m.log.Warn("command rejected by policy", "job_id", cmd.JobID, "reason", dec.Reason, "detail", dec.Detail)
-		m.reject(cmd.JobID, dec.Reason, dec.Detail, cmdHash, issuerFor(cmd))
+		m.reject(cmd.JobID, dec.Reason, dec.Detail, cmdHash, actorFor(cmd))
 		return
 	}
 
 	m.mu.Lock()
 	if _, dup := m.seen[cmd.JobID]; dup {
 		m.mu.Unlock()
-		m.reject(cmd.JobID, "duplicate_job_id", "job_id already processed", cmdHash, issuerFor(cmd))
+		m.reject(cmd.JobID, "duplicate_job_id", "job_id already processed", cmdHash, actorFor(cmd))
 		return
 	}
 	if m.running >= m.pol.MaxParallelJobs {
 		m.mu.Unlock()
-		m.reject(cmd.JobID, "too_many_jobs", fmt.Sprintf("max_parallel_jobs (%d) reached", m.pol.MaxParallelJobs), cmdHash, issuerFor(cmd))
+		m.reject(cmd.JobID, "too_many_jobs", fmt.Sprintf("max_parallel_jobs (%d) reached", m.pol.MaxParallelJobs), cmdHash, actorFor(cmd))
 		return
 	}
 	m.seen[cmd.JobID] = struct{}{}
@@ -120,7 +120,7 @@ func (m *Manager) handleSchemaError(payload []byte, err error) {
 	}, nil)
 }
 
-func (m *Manager) reject(jobID, reason, detail, cmdHash string, issuer *evidence.Issuer) {
+func (m *Manager) reject(jobID, reason, detail, cmdHash string, actor *evidence.Actor) {
 	m.pub.Status(jobID, "rejected", detail)
 	m.pub.Result(events.ResultEvent{
 		JobID:         jobID,
@@ -130,15 +130,15 @@ func (m *Manager) reject(jobID, reason, detail, cmdHash string, issuer *evidence
 		PolicyVersion: m.pol.PolicyVersion,
 		PolicyHash:    m.pol.Hash,
 		CommandHash:   cmdHash,
-	}, issuer)
+	}, actor)
 }
 
-// issuerFor derives the evidence issuer from a command's self-declared operator.
-func issuerFor(c *commands.Command) *evidence.Issuer {
+// actorFor derives the evidence actor from a command's self-declared operator.
+func actorFor(c *commands.Command) *evidence.Actor {
 	if c != nil && c.Operator != "" {
-		return &evidence.Issuer{Auth: "self-declared", Identity: c.Operator}
+		return &evidence.Actor{Auth: evidence.ActorAuthSelfDeclared, ID: c.Operator}
 	}
-	return &evidence.Issuer{Auth: "none"}
+	return &evidence.Actor{Auth: evidence.ActorAuthNone}
 }
 
 func (m *Manager) run(c *commands.Command, cmdHash string) {
@@ -210,7 +210,7 @@ func (m *Manager) run(c *commands.Command, cmdHash string) {
 	if runErr != nil && len(res.Errors) == 0 {
 		res.Errors = []string{logging.Redact(runErr.Error())}
 	}
-	m.pub.Result(res, issuerFor(c))
+	m.pub.Result(res, actorFor(c))
 	m.pub.Status(c.JobID, status, "")
 }
 

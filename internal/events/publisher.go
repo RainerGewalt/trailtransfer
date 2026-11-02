@@ -61,23 +61,28 @@ func (p *Publisher) Log(jobID, level, msg string) {
 	})
 }
 
-// Result finalises worker identity/version, seals the record into the evidence
-// hash chain (and journal), then publishes the sealed envelope (QoS 1). The
-// caller fills the semantic fields; issuer records who caused it.
-func (p *Publisher) Result(r ResultEvent, issuer *evidence.Issuer) {
+// Result finalises worker identity/version, seals the result as a
+// trail.evidence/1 record in the evidence hash chain (and journal), then
+// publishes the sealed record (QoS 1). The caller fills the semantic fields;
+// actor records who caused it.
+func (p *Publisher) Result(r ResultEvent, actor *evidence.Actor) {
 	r.EventType = TypeResult
 	r.WorkerID = p.cfg.WorkerID
 	r.WorkerVersion = p.ver
 	if r.Errors == nil {
 		r.Errors = []string{}
 	}
-	env, err := p.sealer.Seal(TypeResult, r, issuer)
+	eventType := EvidenceJobResult
+	if r.Status == "rejected" {
+		eventType = EvidenceJobRejected
+	}
+	rec, err := p.sealer.Seal(eventType, r.JobID, r, actor)
 	if err != nil {
 		// Never drop a result: fall back to the unsealed payload.
 		p.send(p.cfg.JobResultTopic(r.JobID), 1, false, r)
 		return
 	}
-	_ = p.mq.Publish(p.cfg.JobResultTopic(r.JobID), 1, false, env)
+	_ = p.mq.Publish(p.cfg.JobResultTopic(r.JobID), 1, false, rec)
 }
 
 // Health publishes the retained heartbeat (QoS 1, retained).

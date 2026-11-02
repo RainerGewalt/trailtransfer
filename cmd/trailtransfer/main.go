@@ -93,23 +93,29 @@ func cmdRun(args []string) {
 		log.Warn("rclone binary not found — transfer jobs will fail until it is on PATH", "binary", cfg.RcloneBinary)
 	}
 
-	sealer, err := evidence.NewSealer(cfg.WorkerID, cfg.EvidenceJournal)
-	if err != nil {
-		fatal(fmt.Errorf("evidence journal: %w", err))
-	}
-	defer sealer.Close()
-	if sealer.JournalEnabled() {
-		log.Info("evidence journal enabled", "path", cfg.EvidenceJournal)
-	} else {
-		log.Warn("evidence journal disabled — hash chain is in-memory only; set TRAILTRANSFER_EVIDENCE_JOURNAL for durable, recoverable evidence")
+	sealOpts := evidence.Options{
+		ProducerID:      cfg.WorkerID,
+		ProducerVersion: version.String(),
+		Policy:          evidencePolicy(cfg, pol),
+		JournalPath:     cfg.EvidenceJournal,
 	}
 	if cfg.SigningKey != "" {
 		signer, err := evidence.LoadSigner(cfg.SigningKey)
 		if err != nil {
 			fatal(fmt.Errorf("signing key: %w", err))
 		}
-		sealer.SetSigner(signer)
+		sealOpts.Signer = signer
 		log.Info("evidence signing enabled", "key_id", signer.ID())
+	}
+	sealer, err := evidence.NewSealer(sealOpts)
+	if err != nil {
+		fatal(fmt.Errorf("evidence journal: %w", err))
+	}
+	defer sealer.Close()
+	if sealer.JournalEnabled() {
+		log.Info("evidence journal enabled", "path", cfg.EvidenceJournal, "schema", evidence.Schema)
+	} else {
+		log.Warn("evidence journal disabled — hash chain is in-memory only; set TRAILTRANSFER_EVIDENCE_JOURNAL for durable, recoverable evidence")
 	}
 
 	lwt, _ := json.Marshal(events.HealthEvent{
@@ -133,14 +139,14 @@ func cmdRun(args []string) {
 	mgr := jobs.NewManager(pol, pub, runner, log)
 
 	caps := events.CapabilitiesEvent{
-		SupportedActions:      mgr.SupportedActions(),
-		MaxParallelJobs:       pol.MaxParallelJobs,
-		RcloneAvailable:       rclone.Available(cfg.RcloneBinary),
-		EvidenceSchemaVersion: evidence.SchemaVersion,
-		EvidenceJournal:       sealer.JournalEnabled(),
-		EvidenceSigned:        sealer.Signed(),
-		PolicyVersion:         pol.PolicyVersion,
-		PolicyHash:            pol.Hash,
+		SupportedActions: mgr.SupportedActions(),
+		MaxParallelJobs:  pol.MaxParallelJobs,
+		RcloneAvailable:  rclone.Available(cfg.RcloneBinary),
+		EvidenceSchema:   evidence.Schema,
+		EvidenceJournal:  sealer.JournalEnabled(),
+		EvidenceSigned:   sealer.Signed(),
+		PolicyVersion:    pol.PolicyVersion,
+		PolicyHash:       pol.Hash,
 	}
 
 	client.OnConnect(func(c *mqtt.Client) {
@@ -193,18 +199,18 @@ func cmdPrintCapabilities(args []string) {
 		fatal(err)
 	}
 	caps := events.CapabilitiesEvent{
-		EventType:             events.TypeCapabilities,
-		WorkerID:              cfg.WorkerID,
-		Version:               version.String(),
-		SupportedActions:      pol.SupportedActions(),
-		MaxParallelJobs:       pol.MaxParallelJobs,
-		RcloneAvailable:       rclone.Available(cfg.RcloneBinary),
-		EvidenceSchemaVersion: evidence.SchemaVersion,
-		EvidenceJournal:       cfg.EvidenceJournal != "",
-		EvidenceSigned:        cfg.SigningKey != "",
-		PolicyVersion:         pol.PolicyVersion,
-		PolicyHash:            pol.Hash,
-		Timestamp:             time.Now().UTC().Format(time.RFC3339),
+		EventType:        events.TypeCapabilities,
+		WorkerID:         cfg.WorkerID,
+		Version:          version.String(),
+		SupportedActions: pol.SupportedActions(),
+		MaxParallelJobs:  pol.MaxParallelJobs,
+		RcloneAvailable:  rclone.Available(cfg.RcloneBinary),
+		EvidenceSchema:   evidence.Schema,
+		EvidenceJournal:  cfg.EvidenceJournal != "",
+		EvidenceSigned:   cfg.SigningKey != "",
+		PolicyVersion:    pol.PolicyVersion,
+		PolicyHash:       pol.Hash,
+		Timestamp:        time.Now().UTC().Format(time.RFC3339),
 	}
 	b, _ := json.MarshalIndent(caps, "", "  ")
 	fmt.Println(string(b))
@@ -237,23 +243,45 @@ func cmdVerify(args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	if rep.OK {
-		fmt.Printf("OK: %d record(s), hash chain intact", rep.Entries)
-		switch {
-		case pub != nil:
-			fmt.Printf(", %d signature(s) verified\n", rep.SignaturesChecked)
-		case rep.Signed:
-			fmt.Print(", records are signed (pass --pubkey to verify signatures)\n")
-		default:
-			fmt.Println()
+	verdict := "OK"
+	if !rep.OK {
+		verdict = "FAIL"
+	}
+	fmt.Printf("%s: %d record(s), %d restart(s)", verdict, rep.Entries, rep.Restarts)
+	switch {
+	case pub != nil:
+		fmt.Printf(", %d signature(s) verified", rep.SignaturesChecked)
+	case rep.Signed:
+		fmt.Print(", records are signed (pass --pubkey to verify signatures)")
+	}
+	fmt.Println()
+	for _, code := range []string{
+		evidence.CodeSchemaInvalid, evidence.CodeHashMismatch, evidence.CodeChainBreak,
+		evidence.CodeSeqGap, evidence.CodeSignatureInvalid, evidence.CodeRestart,
+	} {
+		if n := rep.Count(code); n > 0 {
+			fmt.Printf("  %-18s %d\n", code, n)
 		}
-		return
 	}
-	fmt.Printf("FAIL: %d record(s) checked\n", rep.Entries)
-	for _, f := range rep.Failures {
-		fmt.Println("  - " + f)
+	for _, f := range rep.Findings {
+		if f.Code == evidence.CodeRestart && rep.OK {
+			continue // restarts are informational; list them only next to real findings
+		}
+		fmt.Println("  - " + f.String())
 	}
-	os.Exit(1)
+	if !rep.OK {
+		os.Exit(1)
+	}
+}
+
+// evidencePolicy maps the loaded worker policy to the record's policy member.
+func evidencePolicy(cfg *config.Config, pol *policy.Policy) evidence.Policy {
+	return evidence.Policy{
+		ID:      cfg.PolicyID,
+		Version: pol.PolicyVersion,
+		Hash:    pol.Hash,
+		Kind:    evidence.PolicyKindTransfer,
+	}
 }
 
 func cmdKeygen(args []string) {

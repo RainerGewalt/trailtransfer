@@ -1,9 +1,12 @@
 package evidence
 
 import (
-	"encoding/json"
+	"crypto/ed25519"
+	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -24,8 +27,8 @@ func writeKeyPair(t *testing.T, dir string) (keyPath, pubPath string) {
 	return keyPath, pubPath
 }
 
-func TestSignedChainVerifies(t *testing.T) {
-	dir := t.TempDir()
+func signedSealer(t *testing.T, dir, path string) (*Sealer, ed25519.PublicKey) {
+	t.Helper()
 	keyPath, pubPath := writeKeyPair(t, dir)
 	signer, err := LoadSigner(keyPath)
 	if err != nil {
@@ -35,12 +38,52 @@ func TestSignedChainVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	path := filepath.Join(dir, "journal.jsonl")
-	s, _ := NewSealer("w1", path)
+	s := newTestSealer(t, path)
 	s.SetSigner(signer)
+	if !s.Signed() {
+		t.Fatal("sealer must report signing")
+	}
+	return s, pub
+}
+
+func TestSignatureIsOverChainHashASCIIBase64URL(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "journal.jsonl")
+	s, pub := signedSealer(t, dir, path)
+	raw, err := s.Seal("transfer.job.result", "job-1", map[string]any{"status": "completed"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+
+	r := decode(t, raw)
+	if r.Signature == nil || r.Signature.Alg != "ed25519" || !strings.HasPrefix(r.Signature.KeyID, "ed25519:") {
+		t.Fatalf("signature member wrong: %+v", r.Signature)
+	}
+	if strings.ContainsAny(r.Signature.Sig, "+/=") {
+		t.Fatalf("sig must be base64url without padding: %s", r.Signature.Sig)
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(r.Signature.Sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ed25519.Verify(pub, []byte(r.ChainHash), sig) {
+		t.Fatal("signature must verify over the ASCII bytes of the chain_hash string")
+	}
+	if ed25519.Verify(pub, mustHex(t, r.ChainHash), sig) {
+		t.Fatal("signature must not be over the decoded digest bytes")
+	}
+	if r.Signature.KeyID != KeyID(pub) {
+		t.Fatalf("key_id %s does not identify the public key %s", r.Signature.KeyID, KeyID(pub))
+	}
+}
+
+func TestSignedChainVerifies(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "journal.jsonl")
+	s, pub := signedSealer(t, dir, path)
 	for i := 0; i < 3; i++ {
-		if _, err := s.Seal("result", map[string]any{"status": "completed", "n": i}, nil); err != nil {
+		if _, err := s.Seal("transfer.job.result", "", map[string]any{"status": "completed", "n": i}, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -53,40 +96,92 @@ func TestSignedChainVerifies(t *testing.T) {
 	if !rep.OK || !rep.Signed || rep.SignaturesChecked != 3 {
 		t.Fatalf("expected 3 verified signatures on an intact chain, got %+v", rep)
 	}
+	// Without a key the chain still verifies and reports that it is signed.
+	rep, _ = Verify(path, nil)
+	if !rep.OK || !rep.Signed || rep.SignaturesChecked != 0 {
+		t.Fatalf("%+v", rep)
+	}
 }
 
-func TestSignatureDetectsForgedRecord(t *testing.T) {
+func TestSignatureInvalidOnForgedRecord(t *testing.T) {
 	dir := t.TempDir()
-	keyPath, pubPath := writeKeyPair(t, dir)
-	signer, _ := LoadSigner(keyPath)
-	pub, _ := LoadPublicKey(pubPath)
-
 	path := filepath.Join(dir, "journal.jsonl")
-	s, _ := NewSealer("w1", path)
-	s.SetSigner(signer)
-	_, _ = s.Seal("result", map[string]any{"status": "completed", "amount": 1}, nil)
+	s, pub := signedSealer(t, dir, path)
+	_, _ = s.Seal("transfer.job.result", "", map[string]any{"status": "completed", "amount": 1}, nil)
+	_, _ = s.Seal("transfer.job.result", "", map[string]any{"status": "completed", "amount": 2}, nil)
 	s.Close()
 
-	// Forge: change the payload AND recompute content_hash + chain_hash so the
-	// unsigned checks would pass — only the signature (no private key) exposes it.
-	data, _ := os.ReadFile(path)
-	var e Envelope
-	if err := json.Unmarshal(data, &e); err != nil {
-		t.Fatal(err)
-	}
-	e.Payload = []byte(`{"status":"completed","amount":999999}`)
-	e.ContentHash, _ = HashBytes(e.Payload)
-	e.ChainHash, _ = e.computeChainHash()
-	// signature left as-is (now over the old chain hash) → must fail
-	forged, _ := json.Marshal(&e)
-	os.WriteFile(path, append(forged, '\n'), 0o600)
+	// Forge: change the payload and re-seal both hashes so unsigned checks
+	// pass; only the signature (no private key) exposes it. Record 1 must be
+	// re-linked as well, as a journal-writing attacker would do.
+	reseal(t, path, 0, func(r *Record) { r.Payload = []byte(`{"amount":999999,"status":"completed"}`) })
+	first := decode(t, readRecords(t, path)[0])
+	reseal(t, path, 1, func(r *Record) { r.PrevHash = first.ChainHash })
 
-	// Without the key: unsigned checks pass (attacker rewrote the chain).
 	if rep, _ := Verify(path, nil); !rep.OK {
-		t.Fatal("unsigned verify unexpectedly failed on a self-consistent forgery")
+		t.Fatalf("unsigned verify unexpectedly failed on a self-consistent forgery: %+v", rep)
 	}
-	// With the key: the forged record's signature does not verify.
-	if rep, _ := Verify(path, pub); rep.OK {
-		t.Fatal("signature verification must reject a forged record")
+	rep, _ := Verify(path, pub)
+	if rep.OK || rep.Count(CodeSignatureInvalid) != 2 || rep.Count(CodeHashMismatch) != 0 {
+		t.Fatalf("both re-sealed records must fail signature verification: %+v %s", rep, codes(rep))
 	}
+}
+
+func TestSignatureInvalidWithWrongKey(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "journal.jsonl")
+	s, _ := signedSealer(t, dir, path)
+	_, _ = s.Seal("transfer.job.result", "", map[string]any{"k": 1}, nil)
+	s.Close()
+
+	otherPub, _, _ := ed25519.GenerateKey(nil)
+	rep, _ := Verify(path, otherPub)
+	if rep.OK || rep.Count(CodeSignatureInvalid) != 1 {
+		t.Fatalf("%+v", rep)
+	}
+}
+
+func TestVerifySignatureRejectsBadEncoding(t *testing.T) {
+	pub, _, _ := ed25519.GenerateKey(nil)
+	for _, sig := range []*Signature{
+		nil,
+		{Alg: "rsa", KeyID: "k", Sig: "AA"},
+		{Alg: "ed25519", KeyID: "k", Sig: "not base64url!"},
+		{Alg: "ed25519", KeyID: "k", Sig: base64.StdEncoding.EncodeToString(make([]byte, 64))},
+		{Alg: "ed25519", KeyID: "k", Sig: base64.RawURLEncoding.EncodeToString(make([]byte, 10))},
+	} {
+		if err := VerifySignature(pub, GenesisHash, sig); err == nil {
+			t.Fatalf("signature %+v must be rejected", sig)
+		}
+	}
+}
+
+func TestLoadSignerRejectsForeignKeys(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "k.key")
+	os.WriteFile(path, []byte("not a pem\n"), 0o600)
+	if _, err := LoadSigner(path); err == nil {
+		t.Fatal("non-PEM key must be rejected")
+	}
+	if _, err := LoadPublicKey(path); err == nil {
+		t.Fatal("non-PEM public key must be rejected")
+	}
+}
+
+func mustHex(t *testing.T, h string) []byte {
+	t.Helper()
+	out := make([]byte, 32)
+	for i := 0; i < 32; i++ {
+		var b byte
+		if _, err := fmtSscanf(h[7+2*i:9+2*i], &b); err != nil {
+			t.Fatal(err)
+		}
+		out[i] = b
+	}
+	return out
+}
+
+func fmtSscanf(s string, b *byte) (int, error) {
+	v, err := strconv.ParseUint(s, 16, 8)
+	*b = byte(v)
+	return 1, err
 }

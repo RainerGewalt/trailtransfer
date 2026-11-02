@@ -1,29 +1,123 @@
 package evidence
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"time"
 )
 
-// Sealer assigns each result record a place in the worker's hash chain and,
-// when a journal path is configured, appends it to an fsync'd append-only file
-// (the durable, "enduring" evidence record). Chain state is recovered from the
-// journal on startup so the chain survives restarts.
+// Options configure a Sealer.
+type Options struct {
+	// ProducerID identifies the worker instance. It becomes producer.id and
+	// stream_id of every record.
+	ProducerID string
+	// ProducerVersion is the build version reported in producer.version.
+	ProducerVersion string
+	// Policy is stamped into every record. Zero value means NoPolicy.
+	Policy Policy
+	// JournalPath is the append-only JSONL journal. Empty keeps the chain in
+	// memory only; it then restarts from genesis with every process.
+	JournalPath string
+	// Signer optionally signs every record.
+	Signer *Signer
+}
+
+// Sealer assigns each record a place in the worker's hash chain and, when a
+// journal path is configured, appends it to an fsync'd append-only file.
 //
-// With no journal the chain still links records within a process lifetime, but
-// resets on restart — enable a journal for full durability.
+// Every process start is a chain restart as defined by the specification: the
+// first record a Sealer seals carries chain_restart=true and anchor_hash set to
+// the last chain_hash found in the journal, or the genesis hash when the
+// journal is empty or absent. Sequence numbers continue after the recovered
+// record so a gap is still visible to a reader who ignores restarts.
 type Sealer struct {
-	workerID   string
+	producer   Producer
+	policy     Policy
 	timeSource string
 
-	mu       sync.Mutex
-	seq      uint64
-	lastHash string
-	journal  *os.File
-	signer   *Signer
+	mu             sync.Mutex
+	nextSeq        uint64
+	lastHash       string
+	restartPending bool
+	journal        *os.File
+	signer         *Signer
+	now            func() time.Time
+}
+
+// NewSealer builds a sealer. If a journal path is set the journal is opened
+// (created if needed) and chain state is recovered from its last record that
+// carries a chain_hash.
+func NewSealer(opts Options) (*Sealer, error) {
+	if opts.ProducerID == "" {
+		return nil, errors.New("evidence: producer id is required")
+	}
+	pol := opts.Policy
+	if pol == (Policy{}) {
+		pol = NoPolicy
+	}
+	s := &Sealer{
+		producer:       Producer{Kind: ProducerTransferWorker, ID: opts.ProducerID, Version: opts.ProducerVersion},
+		policy:         pol,
+		timeSource:     TimeSourceSystem,
+		lastHash:       GenesisHash,
+		restartPending: true,
+		signer:         opts.Signer,
+		now:            time.Now,
+	}
+	if opts.JournalPath == "" {
+		return s, nil
+	}
+	if err := s.recover(opts.JournalPath); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(opts.JournalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	s.journal = f
+	return s, nil
+}
+
+// recover reads the journal and takes the last record's seq and chain_hash as
+// the anchor for this process. A journal that cannot be read for any reason
+// other than absence is an error: sealing blindly on top of it would hide the
+// damage.
+func (s *Sealer) recover(path string) error {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	for sc.Scan() {
+		ln := bytes.TrimSpace(sc.Bytes())
+		if len(ln) == 0 {
+			continue
+		}
+		var tail struct {
+			Seq       uint64 `json:"seq"`
+			ChainHash string `json:"chain_hash"`
+		}
+		if err := json.Unmarshal(ln, &tail); err != nil {
+			return fmt.Errorf("evidence journal %q: unreadable line: %w", path, err)
+		}
+		if tail.ChainHash == "" {
+			return fmt.Errorf("evidence journal %q: line without chain_hash", path)
+		}
+		s.nextSeq = tail.Seq + 1
+		s.lastHash = tail.ChainHash
+	}
+	return sc.Err()
 }
 
 // SetSigner enables Ed25519 signing of every sealed record.
@@ -40,78 +134,58 @@ func (s *Sealer) Signed() bool {
 	return s.signer != nil
 }
 
-// NewSealer builds a sealer. If journalPath is non-empty the journal is opened
-// (created if needed) and chain state is recovered from its last valid record.
-func NewSealer(workerID, journalPath string) (*Sealer, error) {
-	s := &Sealer{workerID: workerID, timeSource: "system", lastHash: GenesisHash}
-	if journalPath == "" {
-		return s, nil
-	}
-	if data, err := os.ReadFile(journalPath); err == nil {
-		for _, ln := range bytes.Split(bytes.TrimRight(data, "\n"), []byte("\n")) {
-			if len(bytes.TrimSpace(ln)) == 0 {
-				continue
-			}
-			var e Envelope
-			if json.Unmarshal(ln, &e) == nil && e.ChainHash != "" {
-				s.seq = e.Seq
-				s.lastHash = e.ChainHash
-			}
-		}
-	}
-	f, err := os.OpenFile(journalPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	s.journal = f
-	return s, nil
-}
-
 // JournalEnabled reports whether records are persisted durably.
 func (s *Sealer) JournalEnabled() bool { return s.journal != nil }
 
-// Seal wraps payload in an envelope, links it into the chain, appends it to the
-// journal (if enabled, fsync'd) and returns the marshalled envelope to publish.
-func (s *Sealer) Seal(eventType string, payload any, issuer *Issuer) (json.RawMessage, error) {
+// Seal wraps payload in a record, links it into the chain, appends it to the
+// journal (if enabled, fsync'd) and returns the marshalled record to publish.
+// actor may be nil, which records auth "none". jobID is optional.
+func (s *Sealer) Seal(eventType, jobID string, payload any, actor *Actor) (json.RawMessage, error) {
 	pb, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
-	contentHash, err := HashBytes(pb)
+	contentHash, err := ContentHashOf(pb)
 	if err != nil {
 		return nil, err
+	}
+	act := Actor{Auth: ActorAuthNone}
+	if actor != nil {
+		act = *actor
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	env := Envelope{
-		SchemaVersion: SchemaVersion,
-		WorkerID:      s.workerID,
-		Seq:           s.seq + 1,
-		PrevHash:      s.lastHash,
-		EventType:     eventType,
-		RecordedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-		TimeSource:    s.timeSource,
-		Issuer:        issuer,
-		Payload:       json.RawMessage(pb),
-		ContentHash:   contentHash,
+	rec := Record{
+		Schema:      Schema,
+		Producer:    s.producer,
+		StreamID:    s.producer.ID,
+		Seq:         s.nextSeq,
+		PrevHash:    s.lastHash,
+		EventType:   eventType,
+		Time:        Time{RecordedAt: s.now().UTC().Format("2006-01-02T15:04:05.000000000Z07:00"), Source: s.timeSource},
+		Actor:       act,
+		Policy:      s.policy,
+		Payload:     json.RawMessage(pb),
+		ContentHash: contentHash,
+		JobID:       jobID,
 	}
-	ch, err := env.computeChainHash()
+	if s.restartPending {
+		rec.ChainRestart = true
+		rec.AnchorHash = s.lastHash
+	}
+	ch, err := rec.computeChainHash()
 	if err != nil {
 		return nil, err
 	}
-	env.ChainHash = ch
+	rec.ChainHash = ch
 
 	if s.signer != nil {
-		sig, err := s.signer.sign(env.ChainHash)
-		if err != nil {
-			return nil, err
-		}
-		env.Signature = sig
+		rec.Signature = s.signer.sign(rec.ChainHash)
 	}
 
-	out, err := json.Marshal(env)
+	out, err := json.Marshal(rec)
 	if err != nil {
 		return nil, err
 	}
@@ -123,8 +197,9 @@ func (s *Sealer) Seal(eventType string, payload any, issuer *Issuer) (json.RawMe
 			return nil, err
 		}
 	}
-	s.seq = env.Seq
-	s.lastHash = env.ChainHash
+	s.nextSeq = rec.Seq + 1
+	s.lastHash = rec.ChainHash
+	s.restartPending = false
 	return out, nil
 }
 

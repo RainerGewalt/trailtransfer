@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"gopkg.in/yaml.v3"
@@ -25,7 +26,10 @@ type Config struct {
 		KeepAliveSeconds int    `yaml:"keep_alive_seconds"`
 	} `yaml:"mqtt"`
 
-	PolicyFile   string `yaml:"policy_file"`
+	PolicyFile string `yaml:"policy_file"`
+	// PolicyID names the policy in evidence records (policy.id). Empty = the
+	// base name of PolicyFile.
+	PolicyID     string `yaml:"policy_id"`
 	RcloneConfig string `yaml:"rclone_config"`
 	RcloneBinary string `yaml:"rclone_binary"`
 
@@ -87,6 +91,7 @@ func (c *Config) applyEnv() {
 	setStr(&c.MQTT.Username, "TRAILTRANSFER_MQTT_USERNAME")
 	setStr(&c.MQTT.Password, "TRAILTRANSFER_MQTT_PASSWORD")
 	setStr(&c.PolicyFile, "TRAILTRANSFER_POLICY_FILE")
+	setStr(&c.PolicyID, "TRAILTRANSFER_POLICY_ID")
 	setStr(&c.RcloneConfig, "TRAILTRANSFER_RCLONE_CONFIG")
 	setStr(&c.RcloneBinary, "TRAILTRANSFER_RCLONE_BINARY")
 	setStr(&c.EvidenceJournal, "TRAILTRANSFER_EVIDENCE_JOURNAL")
@@ -111,6 +116,9 @@ func (c *Config) validate() error {
 	}
 	if c.RcloneConfig == "" {
 		return fmt.Errorf("rclone_config is required (TRAILTRANSFER_RCLONE_CONFIG)")
+	}
+	if c.PolicyID == "" {
+		c.PolicyID = filepath.Base(c.PolicyFile)
 	}
 	if c.HealthIntervalSeconds <= 0 {
 		c.HealthIntervalSeconds = 30

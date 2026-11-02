@@ -95,7 +95,7 @@ func newTestManager(runner Runner) (*Manager, *recorder) {
 		DryRunDefault:   true,
 	}
 	rec := &recorder{}
-	sealer, _ := evidence.NewSealer(cfg.WorkerID, "") // in-memory chain for tests
+	sealer, _ := evidence.NewSealer(evidence.Options{ProducerID: cfg.WorkerID, ProducerVersion: "test"}) // in-memory chain for tests
 	pub := events.NewPublisher(rec, cfg, "test", sealer)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return NewManager(pol, pub, runner, log), rec
@@ -116,11 +116,14 @@ func TestHandleCompletesValidCopy(t *testing.T) {
 	m.Handle([]byte(`{"job_id":"job-001","action":"copy","source":"/data/input","target":"minio-demo:trailtransfer"}`))
 
 	env := rec.waitResult(t, "job-001")
-	if env["event_type"] != "result" {
-		t.Fatalf("expected result envelope, got %v", env["event_type"])
+	if env["schema"] != evidence.Schema || env["event_type"] != "transfer.job.result" {
+		t.Fatalf("expected a trail.evidence/1 transfer.job.result record, got %v / %v", env["schema"], env["event_type"])
 	}
-	if env["seq"].(float64) != 1 || env["prev_hash"] != evidence.GenesisHash {
-		t.Fatalf("first record must be seq 1 off genesis: %+v", env)
+	if env["seq"].(float64) != 0 || env["prev_hash"] != evidence.GenesisHash || env["chain_restart"] != true {
+		t.Fatalf("first record must be seq 0 off genesis with chain_restart: %+v", env)
+	}
+	if env["job_id"] != "job-001" || env["stream_id"] != "worker-01" {
+		t.Fatalf("job_id/stream_id missing: %+v", env)
 	}
 	if !strings.HasPrefix(env["content_hash"].(string), "sha256:") || !strings.HasPrefix(env["chain_hash"].(string), "sha256:") {
 		t.Fatalf("missing chain hashes: %+v", env)
@@ -199,4 +202,20 @@ func TestHandleDedupesJobID(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("expected duplicate_job_id rejection on repeat")
+}
+
+func TestRejectionIsSealedAsRejectedEvent(t *testing.T) {
+	m, rec := newTestManager(fakeRunner{})
+	m.Handle([]byte(`{"job_id":"job-010","action":"copy","source":"/etc","target":"minio-demo:trailtransfer","operator":"alice"}`))
+	env := rec.waitResult(t, "job-010")
+	if env["event_type"] != "transfer.job.rejected" {
+		t.Fatalf("rejections must be sealed as transfer.job.rejected, got %v", env["event_type"])
+	}
+	actor, _ := env["actor"].(map[string]any)
+	if actor["auth"] != "self-declared" || actor["id"] != "alice" {
+		t.Fatalf("actor must carry the self-declared operator: %v", env["actor"])
+	}
+	if env["job_id"] != "job-010" {
+		t.Fatalf("job_id missing on record: %v", env)
+	}
 }

@@ -10,7 +10,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"os"
-	"strings"
 )
 
 // Signer holds an Ed25519 private key used to sign each record's chain hash.
@@ -51,17 +50,14 @@ func LoadSigner(path string) (*Signer, error) {
 	return &Signer{priv: priv, keyID: KeyID(priv.Public().(ed25519.PublicKey))}, nil
 }
 
-// sign produces a detached signature over the record's chain hash.
-func (s *Signer) sign(chainHash string) (*Signature, error) {
-	msg, err := digestBytes(chainHash)
-	if err != nil {
-		return nil, err
-	}
-	sig := ed25519.Sign(s.priv, msg)
-	return &Signature{Alg: "ed25519", KeyID: s.keyID, Sig: base64.StdEncoding.EncodeToString(sig)}, nil
+// sign produces a detached signature over the ASCII bytes of the chain_hash
+// string, encoded as base64url without padding, as the specification requires.
+func (s *Signer) sign(chainHash string) *Signature {
+	sig := ed25519.Sign(s.priv, []byte(chainHash))
+	return &Signature{Alg: "ed25519", KeyID: s.keyID, Sig: base64.RawURLEncoding.EncodeToString(sig)}
 }
 
-// VerifySignature checks sig over chainHash with pub.
+// VerifySignature checks sig over the ASCII bytes of chainHash with pub.
 func VerifySignature(pub ed25519.PublicKey, chainHash string, sig *Signature) error {
 	if sig == nil {
 		return fmt.Errorf("no signature")
@@ -69,16 +65,15 @@ func VerifySignature(pub ed25519.PublicKey, chainHash string, sig *Signature) er
 	if sig.Alg != "ed25519" {
 		return fmt.Errorf("unsupported signature alg %q", sig.Alg)
 	}
-	msg, err := digestBytes(chainHash)
+	sb, err := base64.RawURLEncoding.DecodeString(sig.Sig)
 	if err != nil {
-		return err
+		return fmt.Errorf("signature is not base64url without padding: %w", err)
 	}
-	sb, err := base64.StdEncoding.DecodeString(sig.Sig)
-	if err != nil {
-		return fmt.Errorf("bad signature encoding: %w", err)
+	if len(sb) != ed25519.SignatureSize {
+		return fmt.Errorf("signature has %d bytes, expected %d", len(sb), ed25519.SignatureSize)
 	}
-	if !ed25519.Verify(pub, msg, sb) {
-		return fmt.Errorf("signature does not verify")
+	if !ed25519.Verify(pub, []byte(chainHash), sb) {
+		return fmt.Errorf("signature does not verify with key %s", sig.KeyID)
 	}
 	return nil
 }
@@ -121,12 +116,4 @@ func GenerateKeyPair() (privPEM, pubPEM []byte, keyID string, err error) {
 	privPEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8})
 	pubPEM = pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pkix})
 	return privPEM, pubPEM, KeyID(pub), nil
-}
-
-func digestBytes(hash string) ([]byte, error) {
-	b, err := hex.DecodeString(strings.TrimPrefix(hash, "sha256:"))
-	if err != nil {
-		return nil, fmt.Errorf("bad hash %q: %w", hash, err)
-	}
-	return b, nil
 }

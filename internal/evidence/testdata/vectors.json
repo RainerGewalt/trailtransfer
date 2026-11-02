@@ -1,0 +1,129 @@
+[
+  {
+    "name": "genesis-restart",
+    "record": {
+      "schema": "trail.evidence/1",
+      "producer": {
+        "kind": "transfer-worker",
+        "id": "worker-01",
+        "version": "0.1.0"
+      },
+      "stream_id": "worker-01",
+      "seq": 0,
+      "prev_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "event_type": "transfer.job.result",
+      "time": {
+        "recorded_at": "2026-11-02T10:00:12.500000000Z",
+        "source": "system"
+      },
+      "actor": {
+        "auth": "none"
+      },
+      "policy": {
+        "id": "worker-policy.yaml",
+        "version": "1",
+        "hash": "sha256:abababababababababababababababababababababababababababababababab",
+        "kind": "transfer-policy"
+      },
+      "payload": {
+        "a": "x",
+        "b": 1
+      },
+      "content_hash": "sha256:cdab067e9f3beb32d1252cfd63e492592fecbf591b0d08cadb24bb17f3864246",
+      "chain_hash": "sha256:867edac9e424849438fcaf8db912a7cb17de2493238e27cb033e09e395c42311",
+      "chain_restart": true,
+      "anchor_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "expected_content_hash": "sha256:cdab067e9f3beb32d1252cfd63e492592fecbf591b0d08cadb24bb17f3864246",
+    "expected_chain_hash": "sha256:867edac9e424849438fcaf8db912a7cb17de2493238e27cb033e09e395c42311",
+    "expected_core_jcs": "{\"actor\":{\"auth\":\"none\"},\"anchor_hash\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"chain_restart\":true,\"content_hash\":\"sha256:cdab067e9f3beb32d1252cfd63e492592fecbf591b0d08cadb24bb17f3864246\",\"event_type\":\"transfer.job.result\",\"policy\":{\"hash\":\"sha256:abababababababababababababababababababababababababababababababab\",\"id\":\"worker-policy.yaml\",\"kind\":\"transfer-policy\",\"version\":\"1\"},\"prev_hash\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"producer\":{\"id\":\"worker-01\",\"kind\":\"transfer-worker\",\"version\":\"0.1.0\"},\"schema\":\"trail.evidence/1\",\"seq\":0,\"stream_id\":\"worker-01\",\"time\":{\"recorded_at\":\"2026-11-02T10:00:12.500000000Z\",\"source\":\"system\"}}"
+  },
+  {
+    "name": "second-record-unicode",
+    "record": {
+      "schema": "trail.evidence/1",
+      "producer": {
+        "kind": "transfer-worker",
+        "id": "worker-01",
+        "version": "0.1.0"
+      },
+      "stream_id": "worker-01",
+      "seq": 1,
+      "prev_hash": "sha256:867edac9e424849438fcaf8db912a7cb17de2493238e27cb033e09e395c42311",
+      "event_type": "transfer.job.result",
+      "time": {
+        "recorded_at": "2026-11-02T10:00:13.500000000Z",
+        "source": "system"
+      },
+      "actor": {
+        "auth": "self-declared",
+        "id": "alice"
+      },
+      "policy": {
+        "id": "worker-policy.yaml",
+        "version": "1",
+        "hash": "sha256:abababababababababababababababababababababababababababababababab",
+        "kind": "transfer-policy"
+      },
+      "payload": {
+        "n": 9007199254740993,
+        "z": [
+          1,
+          "two",
+          null,
+          true
+        ],
+        "ü": "ß"
+      },
+      "content_hash": "sha256:813c0ea354e5eff68ea2e0521063f6d3132ccfbde2ae5ba15d745103a06d50ba",
+      "chain_hash": "sha256:1f546a4b8df7e74572397791a2b59af5b2a7dacf54f860fe11e1e786cbe8eb24",
+      "job_id": "job-002"
+    },
+    "expected_content_hash": "sha256:813c0ea354e5eff68ea2e0521063f6d3132ccfbde2ae5ba15d745103a06d50ba",
+    "expected_chain_hash": "sha256:1f546a4b8df7e74572397791a2b59af5b2a7dacf54f860fe11e1e786cbe8eb24",
+    "expected_core_jcs": "{\"actor\":{\"auth\":\"self-declared\",\"id\":\"alice\"},\"content_hash\":\"sha256:813c0ea354e5eff68ea2e0521063f6d3132ccfbde2ae5ba15d745103a06d50ba\",\"event_type\":\"transfer.job.result\",\"policy\":{\"hash\":\"sha256:abababababababababababababababababababababababababababababababab\",\"id\":\"worker-policy.yaml\",\"kind\":\"transfer-policy\",\"version\":\"1\"},\"prev_hash\":\"sha256:867edac9e424849438fcaf8db912a7cb17de2493238e27cb033e09e395c42311\",\"producer\":{\"id\":\"worker-01\",\"kind\":\"transfer-worker\",\"version\":\"0.1.0\"},\"schema\":\"trail.evidence/1\",\"seq\":1,\"stream_id\":\"worker-01\",\"time\":{\"recorded_at\":\"2026-11-02T10:00:13.500000000Z\",\"source\":\"system\"}}"
+  },
+  {
+    "name": "rejected",
+    "record": {
+      "schema": "trail.evidence/1",
+      "producer": {
+        "kind": "transfer-worker",
+        "id": "worker-01",
+        "version": "0.1.0"
+      },
+      "stream_id": "worker-01",
+      "seq": 2,
+      "prev_hash": "sha256:1f546a4b8df7e74572397791a2b59af5b2a7dacf54f860fe11e1e786cbe8eb24",
+      "event_type": "transfer.job.rejected",
+      "time": {
+        "recorded_at": "2026-11-02T10:00:14.500000000Z",
+        "source": "system"
+      },
+      "actor": {
+        "auth": "self-declared",
+        "id": "bob",
+        "roles": [
+          "operator"
+        ]
+      },
+      "policy": {
+        "id": "worker-policy.yaml",
+        "version": "1",
+        "hash": "sha256:abababababababababababababababababababababababababababababababab",
+        "kind": "transfer-policy"
+      },
+      "payload": {
+        "errors": [],
+        "reason": "policy_violation",
+        "status": "rejected"
+      },
+      "content_hash": "sha256:f1ed139e96bb6dbe804fb9659a5834ceb5d802ba9096824b7becbeca36d4a970",
+      "chain_hash": "sha256:ab1769d07df2839aeac1fa3fb10fe05f97c89d426bb1420b0f867974ceccb128",
+      "job_id": "job-003"
+    },
+    "expected_content_hash": "sha256:f1ed139e96bb6dbe804fb9659a5834ceb5d802ba9096824b7becbeca36d4a970",
+    "expected_chain_hash": "sha256:ab1769d07df2839aeac1fa3fb10fe05f97c89d426bb1420b0f867974ceccb128",
+    "expected_core_jcs": "{\"actor\":{\"auth\":\"self-declared\",\"id\":\"bob\",\"roles\":[\"operator\"]},\"content_hash\":\"sha256:f1ed139e96bb6dbe804fb9659a5834ceb5d802ba9096824b7becbeca36d4a970\",\"event_type\":\"transfer.job.rejected\",\"policy\":{\"hash\":\"sha256:abababababababababababababababababababababababababababababababab\",\"id\":\"worker-policy.yaml\",\"kind\":\"transfer-policy\",\"version\":\"1\"},\"prev_hash\":\"sha256:1f546a4b8df7e74572397791a2b59af5b2a7dacf54f860fe11e1e786cbe8eb24\",\"producer\":{\"id\":\"worker-01\",\"kind\":\"transfer-worker\",\"version\":\"0.1.0\"},\"schema\":\"trail.evidence/1\",\"seq\":2,\"stream_id\":\"worker-01\",\"time\":{\"recorded_at\":\"2026-11-02T10:00:14.500000000Z\",\"source\":\"system\"}}"
+  }
+]

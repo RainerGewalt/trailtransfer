@@ -12,6 +12,8 @@ mqtt:
   keep_alive_seconds: 30
 
 policy_file: /config/worker-policy.yaml
+# Name of the policy in evidence records (policy.id). Default: the file name.
+# policy_id: worker-policy.yaml
 rclone_config: /config/rclone.conf
 rclone_binary: rclone
 

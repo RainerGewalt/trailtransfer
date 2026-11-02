@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/RainerGewalt/trailtransfer/schemas/transfer-job-result.schema.json",
+  "title": "TrailTransfer sealed job result",
+  "description": "The record TrailTransfer publishes to trailtransfer/{worker_id}/jobs/{job_id}/result and appends to its evidence journal: a Trail Evidence Record v1 whose payload is the job result. Every terminal outcome is sealed, including rejections.",
+  "allOf": [
+    { "$ref": "trail-evidence-record.schema.json" },
+    {
+      "type": "object",
+      "required": ["job_id"],
+      "properties": {
+        "event_type": { "type": "string", "enum": ["transfer.job.result", "transfer.job.rejected"] },
+        "producer": { "type": "object", "properties": { "kind": { "const": "transfer-worker" } } },
+        "policy": { "type": "object", "properties": { "kind": { "const": "transfer-policy" } } },
+        "job_id": { "type": "string", "minLength": 1 },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["event_type", "job_id", "worker_id", "status", "files_total", "files_transferred", "bytes_transferred", "errors", "policy_version", "worker_version"],
+          "properties": {
+            "event_type": { "const": "result" },
+            "job_id": { "type": "string" },
+            "worker_id": { "type": "string" },
+            "action": { "type": "string", "enum": ["copy", "move", "sync", "check"] },
+            "source": { "type": "string" },
+            "target": { "type": "string" },
+            "status": { "type": "string", "enum": ["completed", "failed", "cancelled", "rejected"] },
+            "reason": { "type": "string", "description": "Machine reason for rejected/failed, e.g. policy_violation." },
+            "detail": { "type": "string" },
+            "justification": { "type": "string", "description": "Human 'why', from command.reason." },
+            "started_at": { "type": "string", "format": "date-time" },
+            "finished_at": { "type": "string", "format": "date-time" },
+            "duration_ms": { "type": "integer", "minimum": 0 },
+            "files_total": { "type": "integer", "minimum": 0 },
+            "files_transferred": { "type": "integer", "minimum": 0 },
+            "bytes_transferred": { "type": "integer", "minimum": 0 },
+            "errors": { "type": "array", "items": { "type": "string" } },
+            "rclone_exit_code": { "type": "integer" },
+            "policy_version": { "type": "string" },
+            "policy_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "worker_version": { "type": "string" },
+            "command_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "SHA-256 of JCS(command as received)." }
+          }
+        }
+      },
+      "if": { "properties": { "event_type": { "const": "transfer.job.rejected" } } },
+      "then": { "properties": { "payload": { "properties": { "status": { "const": "rejected" }, "reason": { "type": "string", "enum": ["schema_violation", "policy_violation", "duplicate_job_id", "too_many_jobs"] } }, "required": ["reason"] } } },
+      "else": { "properties": { "payload": { "properties": { "status": { "enum": ["completed", "failed", "cancelled"] } } } } }
+    }
+  ]
+}

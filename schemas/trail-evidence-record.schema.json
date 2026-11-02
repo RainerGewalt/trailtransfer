@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/RainerGewalt/trailtransfer/schemas/trail-evidence-record.schema.json",
+  "title": "Trail Evidence Record v1",
+  "description": "One record of a Trail Evidence stream (schema trail.evidence/1). All hashes are SHA-256 over RFC 8785 (JCS) bytes, written as 'sha256:' + 64 lowercase hex characters. chain_hash covers exactly the members schema, producer, stream_id, seq, prev_hash, event_type, time, actor, policy, content_hash plus chain_restart and anchor_hash when present. The schema is closed: unknown members are rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "producer", "stream_id", "seq", "prev_hash", "event_type", "time", "actor", "policy", "payload", "content_hash", "chain_hash"],
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "rfc3339utc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$" }
+  },
+  "properties": {
+    "schema": { "const": "trail.evidence/1" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "version"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["broker", "transfer-worker", "source-bridge", "ml-pipeline", "persistence", "other"] },
+        "id": { "type": "string", "minLength": 1, "description": "Stable identifier of the producing instance." },
+        "version": { "type": "string", "description": "Build version of the producer." }
+      }
+    },
+    "stream_id": { "type": "string", "minLength": 1, "description": "Identifies one hash chain. A producer may run several streams." },
+    "seq": { "type": "integer", "minimum": 0, "description": "Strictly increasing by 1 within a stream unless chain_restart is true." },
+    "prev_hash": { "$ref": "#/$defs/hash", "description": "chain_hash of the previous record; all zeros for the first record of a stream." },
+    "event_type": { "type": "string", "pattern": "^[a-z0-9_-]+\\.[a-z0-9_-]+\\.[a-z0-9_-]+$", "description": "<domain>.<noun>.<verb> in lowercase, e.g. transfer.job.result." },
+    "time": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recorded_at", "source"],
+      "properties": {
+        "recorded_at": { "$ref": "#/$defs/rfc3339utc", "description": "Moment of sealing, RFC 3339 UTC, millisecond or finer." },
+        "occurred_at": { "$ref": "#/$defs/rfc3339utc", "description": "When the fact happened at the source." },
+        "read_at": { "$ref": "#/$defs/rfc3339utc", "description": "When the producer read it." },
+        "source": { "type": "string", "enum": ["system", "ntp", "tsa", "seq-reconstructed", "unknown"] }
+      }
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["auth"],
+      "properties": {
+        "auth": { "type": "string", "enum": ["broker-authenticated", "self-declared", "operator-token", "none"] },
+        "id": { "type": "string" },
+        "roles": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "hash"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "hash": { "$ref": "#/$defs/hash", "description": "SHA-256 over the canonical policy document; all zeros when no policy applies." },
+        "status": { "type": "string", "enum": ["draft", "validated", "approved", "active", "retired"] },
+        "kind": { "type": "string", "description": "e.g. transfer-policy, topic-rule, recipe, addressspace, config." }
+      }
+    },
+    "payload": { "description": "Any JSON value; an object is recommended. content_hash is computed over its JCS form." },
+    "content_hash": { "$ref": "#/$defs/hash", "description": "SHA-256 of JCS(payload)." },
+    "chain_hash": { "$ref": "#/$defs/hash", "description": "SHA-256 of JCS(core)." },
+    "chain_restart": { "const": true, "description": "Present and true when seq restarts (new process, new storage). anchor_hash is then required and prev_hash must equal anchor_hash." },
+    "anchor_hash": { "$ref": "#/$defs/hash", "description": "Last known chain_hash of the previous segment, or all zeros if unknown." },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alg", "key_id", "sig"],
+      "properties": {
+        "alg": { "const": "ed25519" },
+        "key_id": { "type": "string", "minLength": 1 },
+        "sig": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$", "description": "Ed25519 signature over the ASCII bytes of the chain_hash string; base64url without padding." }
+      }
+    },
+    "correlation_id": { "type": "string" },
+    "job_id": { "type": "string" },
+    "decision_id": { "type": "string" },
+    "context": { "type": "object", "description": "Informational only; not part of any hash." },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields", "method"],
+      "properties": {
+        "fields": { "type": "array", "items": { "type": "string" }, "description": "JSON pointers inside payload that were masked before hashing." },
+        "method": { "type": "string" }
+      }
+    },
+    "anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["trailmq", "tsa", "worm", "other"] },
+        "ref": { "type": "string" }
+      }
+    }
+  },
+  "dependentRequired": {
+    "chain_restart": ["anchor_hash"],
+    "anchor_hash": ["chain_restart"]
+  }
+}

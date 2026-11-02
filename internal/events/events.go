@@ -11,6 +11,14 @@ const (
 	TypeLog          = "log"
 )
 
+// Evidence event types in the Trail Evidence Record v1 namespace. Only
+// terminal results are sealed: a job that ran ends in transfer.job.result, a
+// job that was turned away before running ends in transfer.job.rejected.
+const (
+	EvidenceJobResult   = "transfer.job.result"
+	EvidenceJobRejected = "transfer.job.rejected"
+)
+
 // StatusEvent marks a job lifecycle transition.
 type StatusEvent struct {
 	EventType string `json:"event_type"`
@@ -90,16 +98,16 @@ type HealthEvent struct {
 
 // CapabilitiesEvent is the retained description of what the worker can do.
 type CapabilitiesEvent struct {
-	EventType             string   `json:"event_type"`
-	WorkerID              string   `json:"worker_id"`
-	Version               string   `json:"version"`
-	SupportedActions      []string `json:"supported_actions"`
-	MaxParallelJobs       int      `json:"max_parallel_jobs"`
-	RcloneAvailable       bool     `json:"rclone_available"`
-	EvidenceSchemaVersion string   `json:"evidence_schema_version"`
-	EvidenceJournal       bool     `json:"evidence_journal"`
-	EvidenceSigned        bool     `json:"evidence_signed"`
-	PolicyVersion         string   `json:"policy_version"`
-	PolicyHash            string   `json:"policy_hash,omitempty"`
-	Timestamp             string   `json:"timestamp"`
+	EventType        string   `json:"event_type"`
+	WorkerID         string   `json:"worker_id"`
+	Version          string   `json:"version"`
+	SupportedActions []string `json:"supported_actions"`
+	MaxParallelJobs  int      `json:"max_parallel_jobs"`
+	RcloneAvailable  bool     `json:"rclone_available"`
+	EvidenceSchema   string   `json:"evidence_schema"`
+	EvidenceJournal  bool     `json:"evidence_journal"`
+	EvidenceSigned   bool     `json:"evidence_signed"`
+	PolicyVersion    string   `json:"policy_version"`
+	PolicyHash       string   `json:"policy_hash,omitempty"`
+	Timestamp        string   `json:"timestamp"`
 }
