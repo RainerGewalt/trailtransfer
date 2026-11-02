@@ -75,13 +75,13 @@
         ],
         "ü": "ß"
       },
-      "content_hash": "sha256:813c0ea354e5eff68ea2e0521063f6d3132ccfbde2ae5ba15d745103a06d50ba",
-      "chain_hash": "sha256:1f546a4b8df7e74572397791a2b59af5b2a7dacf54f860fe11e1e786cbe8eb24",
+      "content_hash": "sha256:4113944cc0db91d70092aa645416b3d86b6eafc6a2962eca093650671018e4b0",
+      "chain_hash": "sha256:6c7ccff5ac5fd845ef72b4c7c7951e64ae0dd75b3b6e87ea64cd6cb5d70d6d0b",
       "job_id": "job-002"
     },
-    "expected_content_hash": "sha256:813c0ea354e5eff68ea2e0521063f6d3132ccfbde2ae5ba15d745103a06d50ba",
-    "expected_chain_hash": "sha256:1f546a4b8df7e74572397791a2b59af5b2a7dacf54f860fe11e1e786cbe8eb24",
-    "expected_core_jcs": "{\"actor\":{\"auth\":\"self-declared\",\"id\":\"alice\"},\"content_hash\":\"sha256:813c0ea354e5eff68ea2e0521063f6d3132ccfbde2ae5ba15d745103a06d50ba\",\"event_type\":\"transfer.job.result\",\"policy\":{\"hash\":\"sha256:abababababababababababababababababababababababababababababababab\",\"id\":\"worker-policy.yaml\",\"kind\":\"transfer-policy\",\"version\":\"1\"},\"prev_hash\":\"sha256:867edac9e424849438fcaf8db912a7cb17de2493238e27cb033e09e395c42311\",\"producer\":{\"id\":\"worker-01\",\"kind\":\"transfer-worker\",\"version\":\"0.1.0\"},\"schema\":\"trail.evidence/1\",\"seq\":1,\"stream_id\":\"worker-01\",\"time\":{\"recorded_at\":\"2026-11-02T10:00:13.500000000Z\",\"source\":\"system\"}}"
+    "expected_content_hash": "sha256:4113944cc0db91d70092aa645416b3d86b6eafc6a2962eca093650671018e4b0",
+    "expected_chain_hash": "sha256:6c7ccff5ac5fd845ef72b4c7c7951e64ae0dd75b3b6e87ea64cd6cb5d70d6d0b",
+    "expected_core_jcs": "{\"actor\":{\"auth\":\"self-declared\",\"id\":\"alice\"},\"content_hash\":\"sha256:4113944cc0db91d70092aa645416b3d86b6eafc6a2962eca093650671018e4b0\",\"event_type\":\"transfer.job.result\",\"policy\":{\"hash\":\"sha256:abababababababababababababababababababababababababababababababab\",\"id\":\"worker-policy.yaml\",\"kind\":\"transfer-policy\",\"version\":\"1\"},\"prev_hash\":\"sha256:867edac9e424849438fcaf8db912a7cb17de2493238e27cb033e09e395c42311\",\"producer\":{\"id\":\"worker-01\",\"kind\":\"transfer-worker\",\"version\":\"0.1.0\"},\"schema\":\"trail.evidence/1\",\"seq\":1,\"stream_id\":\"worker-01\",\"time\":{\"recorded_at\":\"2026-11-02T10:00:13.500000000Z\",\"source\":\"system\"}}"
   },
   {
     "name": "rejected",
@@ -94,7 +94,7 @@
       },
       "stream_id": "worker-01",
       "seq": 2,
-      "prev_hash": "sha256:1f546a4b8df7e74572397791a2b59af5b2a7dacf54f860fe11e1e786cbe8eb24",
+      "prev_hash": "sha256:6c7ccff5ac5fd845ef72b4c7c7951e64ae0dd75b3b6e87ea64cd6cb5d70d6d0b",
       "event_type": "transfer.job.rejected",
       "time": {
         "recorded_at": "2026-11-02T10:00:14.500000000Z",
@@ -119,11 +119,11 @@
         "status": "rejected"
       },
       "content_hash": "sha256:f1ed139e96bb6dbe804fb9659a5834ceb5d802ba9096824b7becbeca36d4a970",
-      "chain_hash": "sha256:ab1769d07df2839aeac1fa3fb10fe05f97c89d426bb1420b0f867974ceccb128",
+      "chain_hash": "sha256:d4f8c1e3c12bad1fe3e2d0df374b406c55558662cd505425cfc1c6c498c5b392",
       "job_id": "job-003"
     },
     "expected_content_hash": "sha256:f1ed139e96bb6dbe804fb9659a5834ceb5d802ba9096824b7becbeca36d4a970",
-    "expected_chain_hash": "sha256:ab1769d07df2839aeac1fa3fb10fe05f97c89d426bb1420b0f867974ceccb128",
-    "expected_core_jcs": "{\"actor\":{\"auth\":\"self-declared\",\"id\":\"bob\",\"roles\":[\"operator\"]},\"content_hash\":\"sha256:f1ed139e96bb6dbe804fb9659a5834ceb5d802ba9096824b7becbeca36d4a970\",\"event_type\":\"transfer.job.rejected\",\"policy\":{\"hash\":\"sha256:abababababababababababababababababababababababababababababababab\",\"id\":\"worker-policy.yaml\",\"kind\":\"transfer-policy\",\"version\":\"1\"},\"prev_hash\":\"sha256:1f546a4b8df7e74572397791a2b59af5b2a7dacf54f860fe11e1e786cbe8eb24\",\"producer\":{\"id\":\"worker-01\",\"kind\":\"transfer-worker\",\"version\":\"0.1.0\"},\"schema\":\"trail.evidence/1\",\"seq\":2,\"stream_id\":\"worker-01\",\"time\":{\"recorded_at\":\"2026-11-02T10:00:14.500000000Z\",\"source\":\"system\"}}"
+    "expected_chain_hash": "sha256:d4f8c1e3c12bad1fe3e2d0df374b406c55558662cd505425cfc1c6c498c5b392",
+    "expected_core_jcs": "{\"actor\":{\"auth\":\"self-declared\",\"id\":\"bob\",\"roles\":[\"operator\"]},\"content_hash\":\"sha256:f1ed139e96bb6dbe804fb9659a5834ceb5d802ba9096824b7becbeca36d4a970\",\"event_type\":\"transfer.job.rejected\",\"policy\":{\"hash\":\"sha256:abababababababababababababababababababababababababababababababab\",\"id\":\"worker-policy.yaml\",\"kind\":\"transfer-policy\",\"version\":\"1\"},\"prev_hash\":\"sha256:6c7ccff5ac5fd845ef72b4c7c7951e64ae0dd75b3b6e87ea64cd6cb5d70d6d0b\",\"producer\":{\"id\":\"worker-01\",\"kind\":\"transfer-worker\",\"version\":\"0.1.0\"},\"schema\":\"trail.evidence/1\",\"seq\":2,\"stream_id\":\"worker-01\",\"time\":{\"recorded_at\":\"2026-11-02T10:00:14.500000000Z\",\"source\":\"system\"}}"
   }
 ]

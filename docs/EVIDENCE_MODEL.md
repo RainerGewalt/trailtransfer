@@ -74,8 +74,16 @@ by `verify`.
 
 - **Canonicalisation:** [RFC 8785 JSON Canonicalization Scheme (JCS)](https://www.rfc-editor.org/rfc/rfc8785)
   gives deterministic bytes regardless of key order, so hashes are stable and
-  reproducible by anyone. TrailTransfer payloads use only strings, booleans,
-  null, arrays, objects and integers, so number formatting is exact.
+  reproducible by anyone. TrailTransfer uses `github.com/gowebpki/jcs`, the
+  same library as the trail-evidence reference implementation, so both
+  canonicalise byte for byte identically.
+- **Numbers:** RFC 8785 renders numbers with ES6 semantics. Integers outside
+  ±2^53 lose precision (2^53+1 canonicalises to 9007199254740992) and floating
+  point values are re-rendered. Any payload value whose exact decimal
+  rendering matters, such as integers beyond ±2^53 or rounding-relevant
+  floats, must be transported as a **string**. TrailTransfer's own result
+  payload contains only small integers (counters, byte totals, exit codes);
+  `bytes_transferred` would only reach 2^53 at about 9 PB per job.
 - **content_hash** proves the payload was not altered.
 - **chain_hash** covers exactly the core members `schema`, `producer`,
   `stream_id`, `seq`, `prev_hash`, `event_type`, `time`, `actor`, `policy`,

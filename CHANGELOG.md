@@ -28,7 +28,9 @@ First release of TrailTransfer, the Go successor of FileFlux.
 - **Evidence model** — results and rejections are sealed as **Trail Evidence
   Record v1** (`trail.evidence/1`), the evidence format shared across the
   Trail projects (reference specification in the upcoming sister project
-  trail-evidence): RFC 8785 (JCS) canonical hashing, `content_hash`,
+  trail-evidence): RFC 8785 (JCS) canonical hashing via
+  `github.com/gowebpki/jcs` (byte-identical with the reference
+  implementation; values needing exact decimals travel as strings), `content_hash`,
   `chain_hash` over a fixed record core, `seq`/`prev_hash` chain with
   `chain_restart`/`anchor_hash` on every process start, `producer`, `time`,
   `actor` and `policy` members, append-only JSONL journal, and optional
