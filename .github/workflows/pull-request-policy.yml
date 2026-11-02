@@ -1,0 +1,37 @@
+name: Pull Request Policy
+
+on:
+  pull_request:
+    branches: [master, staging]
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  branch-direction:
+    name: Branch direction
+    runs-on: ubuntu-latest
+    env:
+      BASE_REF: ${{ github.base_ref }}
+      HEAD_REF: ${{ github.head_ref }}
+      HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+      REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Validate pull request direction
+        shell: bash
+        run: |
+          if [[ "$BASE_REF" == "staging" ]]; then
+            echo "Pull requests into staging follow the normal integration flow."
+            exit 0
+          fi
+
+          if [[ "$BASE_REF" == "master" && "$HEAD_REPOSITORY" == "$REPOSITORY" ]]; then
+            if [[ "$HEAD_REF" == "staging" || "$HEAD_REF" == hotfix/* ]]; then
+              echo "This is an allowed release or hotfix pull request into master."
+              exit 0
+            fi
+          fi
+
+          echo "::error::Pull requests into master must come from the repository's staging branch or an internal hotfix/* branch. Normal changes and external contributions must target staging."
+          exit 1

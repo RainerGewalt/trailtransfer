@@ -2,11 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master, staging]
+    tags: ["v*.*.*"]
   pull_request:
+    branches: [master, staging]
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  quality:
+    name: Go quality gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,5 +30,9 @@ jobs:
         run: go vet ./...
       - name: go test -race
         run: go test -race ./...
+      - name: go test -cover
+        run: go test -cover ./...
       - name: go build
         run: go build ./...
+      - name: Docker Compose configuration
+        run: docker compose config -q
