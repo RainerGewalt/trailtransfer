@@ -75,7 +75,7 @@ mosquitto_pub  -h localhost -p 1883 \
 ```
 
 You'll see `accepted → started → … → completed` on the job's topics, ending in a
-sealed **result envelope** (`seq`, `prev_hash`, `content_hash`, `chain_hash`)
+sealed **evidence record** (`seq`, `prev_hash`, `content_hash`, `chain_hash`)
 whose `payload` carries `command_hash`, `policy_version`, `policy_hash` and
 `worker_version`.
 
@@ -102,34 +102,49 @@ whose `payload` carries `command_hash`, `policy_version`, `policy_hash` and
 Actions: `copy` · `move` · `sync` · `check` · `cancel` · `status`. There is
 deliberately **no** `args`/`flags`/`extra` field — unknown fields are rejected.
 
-## Example result event (sealed evidence envelope)
+## Example result event (sealed evidence record)
 
-The result is wrapped in a tamper-evident envelope and chained to the previous
-record (full model in [`docs/EVIDENCE_MODEL.md`](docs/EVIDENCE_MODEL.md); sample
-in [`examples/events/result.completed.json`](examples/events/result.completed.json)):
+The result is sealed as a **Trail Evidence Record v1** (`trail.evidence/1`),
+the evidence format shared by the Trail projects. Its reference specification
+and cross-implementation test vectors are maintained in the sister project
+*trail-evidence*, which is not yet published; until then
+[`docs/EVIDENCE_MODEL.md`](docs/EVIDENCE_MODEL.md) describes the format as
+implemented here, [`schemas/`](schemas/) holds the JSON Schemas, and
+[`examples/events/result.completed.json`](examples/events/result.completed.json)
+a full sample. Each record is chained to the previous one:
 
 ```json
 {
-  "schema_version": "1",
-  "worker_id": "worker-01",
+  "schema": "trail.evidence/1",
+  "producer": { "kind": "transfer-worker", "id": "worker-01", "version": "0.1.0" },
+  "stream_id": "worker-01",
   "seq": 7,
   "prev_hash": "sha256:…",
-  "event_type": "result",
-  "recorded_at": "2026-01-01T10:00:12.5Z",
-  "time_source": "system",
-  "issuer": { "auth": "self-declared", "identity": "alice" },
+  "event_type": "transfer.job.result",
+  "time": { "recorded_at": "2026-11-02T10:00:12.500Z", "source": "system" },
+  "actor": { "auth": "self-declared", "id": "alice" },
+  "policy": { "id": "worker-policy.yaml", "version": "1", "hash": "sha256:…", "kind": "transfer-policy" },
   "payload": {
     "action": "copy", "source": "/data/input", "target": "minio-demo:trailtransfer",
     "status": "completed", "files_transferred": 10, "bytes_transferred": 12345678,
     "rclone_exit_code": 0, "policy_version": "1", "policy_hash": "sha256:…",
-    "worker_version": "0.2.0", "command_hash": "sha256:…"
+    "worker_version": "0.1.0", "command_hash": "sha256:…"
   },
   "content_hash": "sha256:…",
-  "chain_hash": "sha256:…"
+  "chain_hash": "sha256:…",
+  "job_id": "job-001"
 }
 ```
 
+`content_hash` is SHA-256 over the RFC 8785 (JCS) form of `payload`;
+`chain_hash` is SHA-256 over the JCS form of the record core and links to
+`prev_hash`. Rejected jobs are sealed as `transfer.job.rejected`. The first
+record after every worker start carries `chain_restart` and `anchor_hash`, so
+restarts are visible without being chain breaks.
+
 Verify a whole journal independently: `trailtransfer verify /data/evidence/journal.jsonl`.
+It reports `hash_mismatch`, `chain_break`, `seq_gap`, `schema_invalid`,
+`signature_invalid` and (informational) `restart` findings per record.
 
 ## Worker policy — the security boundary
 
@@ -219,15 +234,14 @@ go test ./...
 
 ## Roadmap
 
-- **v0.1** — MQTT worker, `copy/move/sync/check` + `cancel/status`, policy
-  validation, safe rclone execution, status/result events, health/capabilities,
-  Docker Compose demo.
-- **v0.2** — audit evidence: RFC 8785 (JCS) hashing, sealed envelope with
-  `seq`/`prev_hash` **hash chain**, append-only journal, `trailtransfer verify`,
-  issuer/justification capture, JSON Schemas. *(this)*
-- **v0.3** — **Ed25519 signatures** (`keygen`, `verify --pubkey`) for
-  non-repudiation. *(this)*
-- **next** — RFC 3161 timestamps, file manifest, WORM export, live progress, retries.
+- **v0.1.0** *(this release)* — MQTT worker, `copy/move/sync/check` +
+  `cancel/status`, policy validation, safe rclone execution, status/result
+  events, health/capabilities, Docker Compose demo; evidence as Trail Evidence
+  Record v1 (RFC 8785 hashing, `seq`/`prev_hash` **hash chain**, restart
+  anchoring, append-only journal, `trailtransfer verify`, JSON Schemas) and
+  optional **Ed25519 signatures** (`keygen`, `verify --pubkey`).
+- **next** — RFC 3161 timestamps, file manifest, WORM export, live progress,
+  retries, persistent job deduplication.
 - **v1.0** — stable schemas, hardened image, full CI, deployment/validation guide.
 
 ## Contributing

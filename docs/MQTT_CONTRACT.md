@@ -54,28 +54,36 @@ event. Result `status` is one of `completed | failed | cancelled | rejected`.
 
 - **status** — `event_type, job_id, worker_id, status, detail?, timestamp`
 - **progress** — adds `files_total, files_transferred, bytes_total, bytes_transferred, percent`
-- **result** — a **sealed evidence envelope** (see below and [`EVIDENCE_MODEL.md`](EVIDENCE_MODEL.md))
+- **result** — a **sealed evidence record** (see below and [`EVIDENCE_MODEL.md`](EVIDENCE_MODEL.md))
 - **log** — `level, message`
 - **health** (retained) — `status, uptime_seconds, active_jobs, max_parallel_jobs, rclone_available, policy_version, policy_hash, supported_actions`
-- **capabilities** (retained) — `supported_actions, max_parallel_jobs, rclone_available, evidence_schema_version, evidence_journal, policy_version, policy_hash`
+- **capabilities** (retained) — `supported_actions, max_parallel_jobs, rclone_available, evidence_schema, evidence_journal, evidence_signed, policy_version, policy_hash`
 
-### Result envelope
+### Result record
 
-The result is not a flat object — it is an evidence envelope that wraps the
-result payload and links it into a per-worker hash chain:
+The result is not a flat object — it is a **Trail Evidence Record v1**
+(`"schema": "trail.evidence/1"`) that wraps the result payload and links it
+into the worker's hash chain:
 
 ```
-{ schema_version, worker_id, seq, prev_hash, event_type, recorded_at,
-  time_source, issuer, payload{…result…}, content_hash, chain_hash, signature? }
+{ schema, producer{kind,id,version}, stream_id, seq, prev_hash, event_type,
+  time{recorded_at,source}, actor{auth,id?}, policy{id,version,hash,kind},
+  payload{…result…}, content_hash, chain_hash, job_id,
+  chain_restart?, anchor_hash?, signature? }
 ```
 
-The `payload` carries the audit fields `command_hash`, `policy_version`,
-`policy_hash`, `worker_version`, `rclone_exit_code`, `status`, counters and
-(for rejections) `reason`/`detail`. The envelope adds `content_hash` =
-`SHA-256(JCS(payload))` and `chain_hash` linking to `prev_hash`. Machine-readable
-contracts: [`../schemas/command.schema.json`](../schemas/command.schema.json),
-[`../schemas/result-envelope.schema.json`](../schemas/result-envelope.schema.json).
-Verify a journal with `trailtransfer verify <path>`.
+`event_type` is `transfer.job.result` for completed, failed and cancelled jobs
+and `transfer.job.rejected` for jobs refused by schema or policy. The `payload`
+carries the audit fields `command_hash`, `policy_version`, `policy_hash`,
+`worker_version`, `rclone_exit_code`, `status`, counters and (for rejections)
+`reason`/`detail`; its own `event_type` stays `result`. The record adds
+`content_hash` = `SHA-256(JCS(payload))` and `chain_hash` linking to
+`prev_hash`. Machine-readable contracts:
+[`../schemas/command.schema.json`](../schemas/command.schema.json),
+[`../schemas/trail-evidence-record.schema.json`](../schemas/trail-evidence-record.schema.json)
+(generic record) and
+[`../schemas/transfer-job-result.schema.json`](../schemas/transfer-job-result.schema.json)
+(result payload). Verify a journal with `trailtransfer verify <path>`.
 
 ### Rejection reason codes
 

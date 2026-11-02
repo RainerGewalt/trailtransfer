@@ -26,7 +26,7 @@ job admission and lifecycle manager
 fixed rclone argument vector -> rclone subprocess
     |
     v
-status, progress, logs, and sealed result envelope
+status, progress, logs, and sealed result record
 ```
 
 The MQTT payload is untrusted. The operator-provided policy and rclone
@@ -45,7 +45,7 @@ a free-form rclone argument list from MQTT.
 | `internal/rclone` | Fixed argument construction, subprocess execution, and JSON progress parsing |
 | `internal/mqtt` | Paho MQTT client, reconnect behavior, subscriptions, publishing, and Last Will |
 | `internal/events` | Canonical status, progress, result, log, health, and capabilities payloads |
-| `internal/evidence` | JCS hashing, result envelopes, hash chaining, journaling, signing, and verification |
+| `internal/evidence` | JCS hashing, Trail Evidence Record v1 sealing, hash chaining, journaling, signing, and verification |
 | `internal/logging` | Structured logging and credential-pattern redaction |
 | `internal/health` | Retained worker heartbeat publication |
 | `internal/version` | Build-time worker version |
@@ -253,21 +253,24 @@ Policy and schema rejections with a usable `job_id` also produce result records.
 They carry a stable machine-readable reason, an English detail, the policy
 version and hash, and a command hash when the rejected payload can be hashed.
 
-The publisher wraps the result payload in an evidence envelope. The envelope
-contains a monotonic sequence number, the previous record's hash, recording
-time, the payload's `content_hash`, and the envelope's `chain_hash`. Hashing uses
-RFC 8785 JSON Canonicalization Scheme semantics implemented in
-`internal/evidence`.
+The publisher seals the result payload as a Trail Evidence Record v1
+(`trail.evidence/1`). The record contains the producer, a stream id, a
+monotonic sequence number, the previous record's hash, the recording time and
+its source, the actor, the governing policy, the payload's `content_hash`, and
+the record's `chain_hash`. Hashing uses RFC 8785 JSON Canonicalization Scheme
+semantics implemented in `internal/evidence`. The format is described in
+[`EVIDENCE_MODEL.md`](EVIDENCE_MODEL.md).
 
-When `evidence_journal` is configured, each sealed envelope is appended to a
-JSONL file and synchronized to storage. Startup recovers the sequence and
-previous hash from the journal. Without a journal, the hash chain exists only
-for the process lifetime.
+When `evidence_journal` is configured, each sealed record is appended to a
+JSONL file and synchronized to storage. Startup reads the last record of the
+journal and seals the first new record with `chain_restart` and `anchor_hash`
+pointing at it; without a journal, or with an empty one, the anchor is the
+genesis hash. A journal whose last line is unreadable stops the worker.
 
 Ed25519 signing is implemented and optional. When `signing_key` is configured,
-the sealer signs each envelope's chain hash. `trailtransfer verify` independently
-checks journal hashes and can verify signatures when given the corresponding
-public key.
+the sealer signs the ASCII bytes of each record's `chain_hash`. `trailtransfer
+verify` independently checks schema, hashes, links, sequence and restarts, and
+can verify signatures when given the corresponding public key.
 
 MQTT publication is synchronous at the client boundary, but failed publishes
 are not queued durably. If sealing fails, the publisher attempts to publish the

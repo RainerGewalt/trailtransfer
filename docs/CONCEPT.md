@@ -201,22 +201,26 @@ vulnerability-reporting process.
 ## Evidence and auditability
 
 Terminal transfer outcomes and job-addressable schema or policy rejections are
-sealed into an evidence envelope. The result payload records fields such as the
+sealed as Trail Evidence Records (`trail.evidence/1`), the evidence format
+shared by the Trail projects. The result payload records fields such as the
 action, source, target, status, rclone exit code, counters, `command_hash`,
 `policy_version`, `policy_hash`, and `worker_version`.
 
-The envelope adds:
+The record adds:
 
 - `content_hash`, the SHA-256 digest of the RFC 8785 JCS canonical result
   payload;
 - `seq` and `prev_hash`, which order records and link each record to its
   predecessor;
-- `chain_hash`, which commits to the envelope core and the preceding link;
-- `recorded_at` and an explicit `time_source`; and
+- `chain_hash`, which commits to the record core and the preceding link;
+- `producer`, `stream_id`, `time`, `actor` and `policy`, which say who sealed
+  the record, when, on whose instruction and under which ruleset;
+- `chain_restart` and `anchor_hash` on the first record of each process; and
 - an optional Ed25519 signature, including a stable key identifier.
 
-When a journal path is configured, the worker appends one envelope per line,
-calls `fsync`, and restores the chain head on restart. Reviewers can run
+When a journal path is configured, the worker appends one record per line,
+calls `fsync`, and anchors the new segment to the last recorded chain hash on
+restart. Reviewers can run
 `trailtransfer verify` without a broker, database, cloud service, or TrailMQ.
 `trailtransfer keygen` and `verify --pubkey` provide the implemented signing and
 signature-verification workflow.

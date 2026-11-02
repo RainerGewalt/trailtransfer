@@ -11,16 +11,16 @@
 
 | Principle | How TrailTransfer supports it |
 |---|---|
-| **Attributable** | `worker_id`, `command_hash`, self-declared `issuer` (command `operator`), and optional Ed25519 signature (`key_id`); strong identity via broker ACL/mTLS (operator) |
-| **Legible** | structured JSON, `schema_version`, published JSON Schemas (`schemas/`) |
-| **Contemporaneous** | `recorded_at` (ISO 8601 UTC) at seal time; `time_source` declared; NTP is operator responsibility (ISO 27001 8.17) |
+| **Attributable** | `producer`, `command_hash`, self-declared `actor` (command `operator`), and optional Ed25519 signature (`key_id`); strong identity via broker ACL/mTLS (operator) |
+| **Legible** | structured JSON, `schema` `trail.evidence/1`, published JSON Schemas (`schemas/`) |
+| **Contemporaneous** | `time.recorded_at` (RFC 3339 UTC) at seal time; `time.source` declared; NTP is operator responsibility (ISO 27001 8.17) |
 | **Original** | the sealed journal record is the original; hashes fix its content |
 | **Accurate** | `rclone_exit_code`, transfer counters, captured errors; optional file manifest (v0.3) |
 | **Complete** | completed **and** rejected jobs are recorded; journal + fsync; store-and-forward planned |
-| **Consistent** | monotonic `seq` + `prev_hash` hash chain (chronological, gap-detecting) |
-| **Enduring** | append-only journal on a durable/WORM volume; chain recovered on restart |
+| **Consistent** | monotonic `seq` + `prev_hash` hash chain (chronological, gap-detecting); restarts anchored and reported separately |
+| **Enduring** | append-only journal on a durable/WORM volume; new segments anchored to the last record on restart |
 | **Available** | `trailtransfer verify` + the plain-text journal; readable without any service |
-| **Traceable** | chain of custody: issuer → policy (`policy_hash`) → execution → sealed result |
+| **Traceable** | chain of custody: actor → policy (`policy.id`, `policy.hash`) → execution → sealed result |
 
 ## EU GMP Annex 11 / 21 CFR Part 11 (indicative)
 
@@ -30,8 +30,8 @@
 | Audit trail not alterable | tamper-evident chain + `verify` | WORM storage, access control |
 | Access / authority checks (Annex 11 §12) | policy allowlists; command schema | broker auth + ACL, mTLS, RBAC |
 | Electronic records retained & retrievable | JSONL journal, `verify`, export | retention period, backup |
-| Electronic signatures (Part 11 Subpart C) | optional Ed25519 envelope signatures (`keygen`, `verify --pubkey`) | signature policy, key management/HSM |
-| Data integrity & time | JCS hashes, ISO 8601, `time_source` | NTP; optional RFC 3161 TSA |
+| Electronic signatures (Part 11 Subpart C) | optional Ed25519 record signatures (`keygen`, `verify --pubkey`) | signature policy, key management/HSM |
+| Data integrity & time | JCS hashes, RFC 3339, `time.source` | NTP; optional RFC 3161 TSA |
 
 *Indicative only — not a gap assessment. Map against your own SOPs.*
 

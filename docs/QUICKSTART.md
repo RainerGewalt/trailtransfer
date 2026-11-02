@@ -31,8 +31,8 @@ mosquitto_pub -h localhost -p 1883 \
 ```
 
 You'll see `accepted → started → completed` on the job's topics, ending in a
-sealed **result envelope** with `seq`, `prev_hash`, `content_hash` and
-`chain_hash`.
+sealed **evidence record** (`trail.evidence/1`) with `seq`, `prev_hash`,
+`content_hash` and `chain_hash`.
 
 Try a rejection too — this one is refused by policy (source `/etc` is not
 allowed), and the rejection is itself a sealed, audited record:
@@ -49,7 +49,7 @@ no cloud:
 
 ```bash
 docker compose exec trailtransfer trailtransfer verify /data/evidence/journal.jsonl
-# OK: N record(s), hash chain intact
+# OK: N record(s), 1 restart(s)
 ```
 
 Change one byte in that file and run it again — it will report the exact record
