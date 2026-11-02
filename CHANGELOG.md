@@ -56,8 +56,8 @@ First release of TrailTransfer, the Go successor of FileFlux.
 - Documentation describes the current **Go** implementation
   (`docs/ARCHITECTURE.md`, `docs/CONCEPT.md`) instead of the Rust→Go migration
   blueprint.
-- CI runs on `main` and on release tags; the earlier staging/master pull-request policy
-  workflow enforces the branch direction.
+- CI runs on `main` and on release tags; `main` is the only long-lived branch
+  (see `docs/GIT_WORKFLOW.md`).
 - The capabilities event reports `evidence_schema` (`trail.evidence/1`) instead
   of `evidence_schema_version`.
 - `.gitignore` hardened to keep secrets, IDE metadata and build artifacts out of
