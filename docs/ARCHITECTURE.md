@@ -323,9 +323,9 @@ make lint
 make build
 ```
 
-The Makefile exposes an `integration-test` entry point, but the repository does
-not yet contain a real integration-tagged MQTT/rclone/S3 test suite. It must
-not be reported as integration coverage.
+There is no integration test suite for MQTT, rclone and S3 yet; the Docker
+demo is checked by hand before a release. It must not be reported as
+integration coverage.
 
 ## Archived legacy implementation
 

@@ -8,6 +8,10 @@
 /evidence
 *.jsonl
 
+# Demo input, mounted read-only at /data/input
+/upload_folder/*
+!/upload_folder/.gitkeep
+
 # Local secrets & config (ship only *.example)
 .env
 .env.*

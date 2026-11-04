@@ -224,6 +224,16 @@ func cmdVerify(args []string) {
 	path := *journal
 	if path == "" && fs.NArg() > 0 {
 		path = fs.Arg(0)
+		// Accept flags after the path too ("verify j.jsonl --pubkey k.pub"):
+		// Go's flag package stops at the first positional argument, which
+		// used to drop --pubkey silently and report OK without checking
+		// signatures.
+		_ = fs.Parse(fs.Args()[1:])
+		if fs.NArg() > 0 {
+			fmt.Fprintf(os.Stderr, "unexpected argument %q\n", fs.Arg(0))
+			fmt.Fprintln(os.Stderr, "usage: trailtransfer verify [--pubkey key.pub] <journal-path>")
+			os.Exit(2)
+		}
 	}
 	if path == "" {
 		fmt.Fprintln(os.Stderr, "usage: trailtransfer verify [--pubkey key.pub] <journal-path>")

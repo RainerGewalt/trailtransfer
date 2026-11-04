@@ -23,14 +23,16 @@ mosquitto_pub  -h localhost -p 1883 -t trailtransfer/worker-01/commands \
 ```
 jobs/job-001/status   {"status":"accepted"}
 jobs/job-001/status   {"status":"started"}
-jobs/job-001/logs     {"level":"INFO","message":"starting copy /data/input -> s3-demo:trailtransfer (dry_run=true)"}
+jobs/job-001/logs     {"level":"INFO","message":"starting copy /data/input -> s3-demo:trailtransfer (dry_run=false)"}
 jobs/job-001/result   {"schema":"trail.evidence/1","seq":7,"prev_hash":"sha256:…","event_type":"transfer.job.result",...,"payload":{"status":"completed",...,"command_hash":"sha256:…"},"content_hash":"sha256:…","chain_hash":"sha256:…","job_id":"job-001"}
 jobs/job-001/status   {"status":"completed"}
 ```
 
 ## Rejections
 
-Sending a disallowed source produces a clean rejection (no rclone runs):
+Sending a disallowed source produces a clean rejection (no rclone runs). The
+result topic carries the sealed record (`transfer.job.rejected`); its
+`payload` looks like this:
 
 ```json
 { "event_type": "result", "job_id": "job-002", "status": "rejected",
@@ -40,7 +42,7 @@ Sending a disallowed source produces a clean rejection (no rclone runs):
 ```
 
 Sending an unknown field (an attempt to smuggle rclone args) is rejected by the
-schema:
+schema; again the `payload` of the sealed record:
 
 ```json
 { "event_type": "result", "job_id": "job-003", "status": "rejected",

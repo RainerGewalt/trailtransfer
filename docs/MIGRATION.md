@@ -39,7 +39,7 @@ rename during this task: `TRAILTRANSFER_RCLONE_PATH` → `TRAILTRANSFER_RCLONE_B
 `FileFlux/fileflux/FILEFLUX` → `TrailTransfer/trailtransfer/TRAILTRANSFER` across
 code, README, docs, Docker, compose, CI, examples and MQTT topics. The GitHub
 repository was renamed to `trailtransfer` on 2026-11-02; the Go module is `github.com/RainerGewalt/trailtransfer`,
-so renaming the repo to `trailtransfer` is the one remaining external step.
+so no external step remains.
 
 ## Removed / archived
 

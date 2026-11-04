@@ -51,6 +51,7 @@ no cloud:
 ```bash
 docker compose exec trailtransfer trailtransfer verify /data/evidence/journal.jsonl
 # OK: N record(s), 1 restart(s)
+#   restart            1
 ```
 
 Change one byte in that file and run it again — it will report the exact record

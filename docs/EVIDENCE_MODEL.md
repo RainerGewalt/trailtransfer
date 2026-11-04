@@ -6,9 +6,10 @@ rather than just logged. It needs no database, no cloud, and no TrailMQ.
 
 The record format is the **Trail Evidence Record v1** (`trail.evidence/1`),
 the shared evidence format of the Trail projects. Its reference specification
-and test vectors live in the sister project **trail-evidence**, which is not
-yet published; this document describes the format as TrailTransfer implements
-it, and `internal/evidence/testdata/vectors.json` holds the vectors this
+and test vectors live in the sister project
+[trail-evidence](https://github.com/RainerGewalt/trail-evidence), whose
+verifiers (Go, Python, browser) also check TrailTransfer journals; this
+document describes the format as TrailTransfer implements it, and `internal/evidence/testdata/vectors.json` holds the vectors this
 implementation produces. The JSON Schemas are in
 [`../schemas/trail-evidence-record.schema.json`](../schemas/trail-evidence-record.schema.json)
 (generic record) and

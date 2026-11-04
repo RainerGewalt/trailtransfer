@@ -29,8 +29,10 @@ stamped into every result event. Defaults are restrictive.
 5. absolute local `target` → `allow_absolute_targets`?
 6. `target` in/under `allowed_targets`?
 
-Any failure yields a clean `rejected` **result** event with `reason` and
-`detail` — never a silent failure. Concurrency and duplicate-`job_id` checks run
+Any failure of a command that carries a `job_id` yields a clean `rejected`
+**result** event with `reason` and `detail`. A command without a `job_id`
+(with `require_job_id: true`) has no job topic to answer on: the worker logs
+it and drops it. Concurrency and duplicate-`job_id` checks run
 after policy, at admission.
 
 ## Operating notes

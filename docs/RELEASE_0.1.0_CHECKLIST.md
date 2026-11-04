@@ -1,8 +1,8 @@
 # Release checklist for v0.1.0
 
-Status: **prepared, not tagged**. The code and documentation for v0.1.0 live
-on `feat/evidence-record-v1` (on top of `chore/repository-hygiene`). Nothing
-has been pushed or merged. This list collects what the repository owner must
+Status: **done**. v0.1.0 was tagged and released on 2026-11-02; this file is
+kept as the record of what was checked. It was written before the release,
+when the code still lived on `feat/evidence-record-v1`. This list collects what the repository owner must
 check or decide by hand before `git tag -a v0.1.0`; the generic procedure is in
 [`RELEASE.md`](RELEASE.md).
 
@@ -74,5 +74,6 @@ check or decide by hand before `git tag -a v0.1.0`; the generic procedure is in
 - [ ] Annotated tag on the merge commit: `git tag -a v0.1.0 -m "v0.1.0"`,
       then `git push origin v0.1.0`.
 - [ ] Confirm the GHCR image `v0.1.0` and `latest` exist and run
-      `docker run --rm ghcr.io/RainerGewalt/trailtransfer:v0.1.0 version`.
+      `docker run --rm ghcr.io/rainergewalt/trailtransfer:0.1.0 version`
+      (image names are lowercase; the semver tag has no `v`).
 - [ ] Create the GitHub Release from the tag with the 0.1.0 changelog section.

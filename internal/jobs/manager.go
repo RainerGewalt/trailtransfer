@@ -4,8 +4,10 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -187,7 +189,6 @@ func (m *Manager) run(c *commands.Command, cmdHash string) {
 		status = "failed"
 	}
 
-	exit := out.ExitCode
 	res := events.ResultEvent{
 		JobID:            c.JobID,
 		Action:           string(c.Action),
@@ -202,10 +203,17 @@ func (m *Manager) run(c *commands.Command, cmdHash string) {
 		FilesTransferred: out.FilesTransferred,
 		BytesTransferred: out.BytesTransferred,
 		Errors:           out.Errors,
-		RcloneExitCode:   &exit,
 		PolicyVersion:    m.pol.PolicyVersion,
 		PolicyHash:       m.pol.Hash,
 		CommandHash:      cmdHash,
+	}
+	// The exit code is evidence only if rclone ran: a clean exit, or an exit
+	// with a code. When it could not start (binary missing, bad arguments),
+	// there is no code, and a 0 would read as success in a failed record.
+	var exitErr *exec.ExitError
+	if runErr == nil || errors.As(runErr, &exitErr) {
+		exit := out.ExitCode
+		res.RcloneExitCode = &exit
 	}
 	if runErr != nil && len(res.Errors) == 0 {
 		res.Errors = []string{logging.Redact(runErr.Error())}

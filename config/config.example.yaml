@@ -11,6 +11,8 @@ mqtt:
   password: ""
   keep_alive_seconds: 30
 
+# Paths are inside the container (see the volumes in docker-compose.yaml).
+# Copy the *.example files to these names, or point at the *.example files.
 policy_file: /config/worker-policy.yaml
 # Name of the policy in evidence records (policy.id). Default: the file name.
 # policy_id: worker-policy.yaml

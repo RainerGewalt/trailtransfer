@@ -70,6 +70,21 @@ manager · an enterprise MFT suite · a cloud service.
   timestamps remain future assurance work; see
   [the evidence model](docs/EVIDENCE_MODEL.md) for the current boundary.
 
+## Install
+
+- **Container image** for linux/amd64 and linux/arm64, with rclone 1.68
+  inside, running as `nonroot`:
+  `docker pull ghcr.io/rainergewalt/trailtransfer:0.1.0`. Mount config,
+  policy and `rclone.conf` under `/config` as `docker-compose.yaml` does.
+- **Go 1.26 or newer:**
+  `go install github.com/RainerGewalt/trailtransfer/cmd/trailtransfer@latest`.
+  Transfer jobs need `rclone` on the `PATH`; without it the worker starts,
+  reports `rclone_available: false` and fails transfer jobs. A binary built
+  this way from v0.1.0 reports its version as `dev`; main fixes that.
+- **From a clone:** `make build`, or `go build ./cmd/trailtransfer`.
+
+The GitHub release has no prebuilt binaries yet.
+
 ## Quickstart
 
 ```bash
@@ -218,7 +233,7 @@ Job lifecycle: `received → rejected` (schema/policy) **or**
 trailtransfer run [--config config.yaml]     # start the worker
 trailtransfer validate-config [--config …]   # load config+policy, exit 0/1
 trailtransfer print-capabilities [--config …]# print the capabilities JSON
-trailtransfer verify <journal>               # independently verify the evidence chain (--pubkey to check signatures)
+trailtransfer verify [--pubkey key.pub] <journal>  # independently verify the evidence chain and, with a key, the signatures
 trailtransfer keygen [--out name]            # generate an Ed25519 signing key pair
 trailtransfer version
 ```
@@ -259,14 +274,18 @@ go test ./...
 
 ## Roadmap
 
-- **v0.1.0** *(this release)* — MQTT worker, `copy/move/sync/check` +
+- **v0.1.0** *(released 2026-11-02)* — MQTT worker, `copy/move/sync/check` +
   `cancel/status`, policy validation, safe rclone execution, status/result
   events, health/capabilities, Docker Compose demo; evidence as Trail Evidence
   Record v1 (RFC 8785 hashing, `seq`/`prev_hash` **hash chain**, restart
   anchoring, append-only journal, `trailtransfer verify`, JSON Schemas) and
   optional **Ed25519 signatures** (`keygen`, `verify --pubkey`).
-- **next** — RFC 3161 timestamps, file manifest, WORM export, live progress,
-  retries, persistent job deduplication.
+- **0.2.0** ([milestone](https://github.com/RainerGewalt/trailtransfer/milestone/1))
+  — survive crashes with durable job state, deduplication and an MQTT outbox
+  (#1); a per-file transfer manifest as its own evidence record (#2); a
+  public end-to-end demo between simulated systems with verification (#3);
+  format 0.2 of trail-evidence (#4).
+- **later** — RFC 3161 timestamps, WORM export, retries.
 - **v1.0** — stable schemas, hardened image, full CI, deployment/validation guide.
 
 ## Contributing

@@ -15,17 +15,16 @@ TrailTransfer releases are driven by annotated Git tags of the form `vMAJOR.MINO
 
 ## Cutting a release
 
-1. Ensure `staging` is green and up to date (`make lint`, `make test`,
-   `go build ./...`).
-2. Open a release pull request from `staging` into `master`. Use a merge commit
-   after all required checks pass and conversations are resolved.
+1. Ensure `main` is green and up to date (`make lint`, `make test`,
+   `go build ./...`); see [`GIT_WORKFLOW.md`](GIT_WORKFLOW.md).
+2. In a release pull request into `main`:
 3. Move the `## [Unreleased]` section of [`CHANGELOG.md`](../CHANGELOG.md) to a
    new `## [X.Y.Z] - YYYY-MM-DD` section and add fresh links.
 4. Confirm the docs are consistent (no contradictions with README /
    `docs/EVIDENCE_MODEL.md` / `docs/MIGRATION.md`) and the JSON Schemas are
    stable for this version.
-5. Merge the release pull request, switch to the updated `master`, then create
-   an annotated tag on that merge commit:
+5. Merge the release pull request once CI is green, update your local `main`,
+   then create an annotated tag on that commit:
 
    ```bash
    git tag -a v0.3.0 -m "v0.3.0"
@@ -34,12 +33,13 @@ TrailTransfer releases are driven by annotated Git tags of the form `vMAJOR.MINO
 
 6. Pushing the tag triggers `.github/workflows/docker.yml`, which builds a
    multi-arch (`linux/amd64`, `linux/arm64`) image and pushes it to
-   `ghcr.io/RainerGewalt/trailtransfer` tagged with the semver and `latest`.
+   `ghcr.io/rainergewalt/trailtransfer`, tagged with the version without `v`
+   (`0.3.0`) and `latest`; the binary in it reports that same version.
 
 ## Release checklist
 
-- [ ] CI green on `staging`
-- [ ] Release pull request from `staging` to `master` approved and merged
+- [ ] CI green on `main`
+- [ ] Release pull request into `main` merged with green CI
 - [ ] `CHANGELOG.md` moved from Unreleased to the new version
 - [ ] Schemas stable / breaking changes documented
 - [ ] Migration notes updated if behavior changed
