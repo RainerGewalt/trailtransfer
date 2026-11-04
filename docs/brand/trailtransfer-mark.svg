@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="t">
+  <title id="t">TrailTransfer: a transfer arrow between two records.</title>
+  <rect x="4" y="4" width="120" height="120" rx="18" fill="#003941"/>
+  <rect x="28" y="33" width="72" height="11" rx="5.5" fill="#ffffff"/>
+  <path d="M33.5 64H92M78 50l15 14-15 14" fill="none" stroke="#F76628" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="28" y="84" width="42" height="11" rx="5.5" fill="#ffffff"/>
+</svg>

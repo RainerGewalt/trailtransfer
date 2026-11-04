@@ -1,4 +1,9 @@
-# TrailTransfer
+<p align="center">
+  <img src="docs/brand/trailtransfer-mark.svg" width="96"
+       alt="TrailTransfer logo: a transfer arrow between two records." />
+</p>
+
+<h1 align="center">TrailTransfer</h1>
 
 **MQTT-controlled rclone worker for audit-ready edge file transfers.**
 
@@ -32,6 +37,14 @@ append-only journal and can be **independently verified** — no database, no
 cloud, no TrailMQ. This is what makes it *audit-ready* and a building block for
 ALCOA++/GxP-style data integrity (see [`docs/EVIDENCE_MODEL.md`](docs/EVIDENCE_MODEL.md)
 and [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md)).
+
+![Terminal transcript. mosquitto_pub sends examples/commands/sync-dry-run.json. jq shows the journal record: event_type transfer.job.rejected, status rejected, detail "sync (which may delete on the target) is not permitted: allow_sync_delete is false", a chain_hash and an ed25519 signature. trailtransfer verify with the public key prints OK, 1 record, 1 signature verified. After sed changes the status to completed in a copy, trailtransfer verify prints FAIL with hash_mismatch and exits with 1.](docs/images/policy-rejection-transcript.png)
+
+*A local run with the example policy and a signing key (`trailtransfer
+keygen`, `TRAILTRANSFER_SIGNING_KEY`): the policy refuses a `sync` command,
+the refusal is sealed and signed in the journal, and `trailtransfer verify`
+passes the journal but fails an edited copy. rclone was not installed for
+this run; it is needed only for jobs the policy accepts.*
 
 ## What it is / is not
 
