@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -158,6 +159,30 @@ func TestHandleRejectsFailedExit(t *testing.T) {
 	p := payloadOf(t, rec.waitResult(t, "job-003"))
 	if p["status"] != "failed" {
 		t.Fatalf("nonzero rclone exit must fail the job, got %v", p["status"])
+	}
+}
+
+func TestHandleOmitsExitCodeWhenRcloneDidNotStart(t *testing.T) {
+	m, rec := newTestManager(fakeRunner{err: &exec.Error{Name: "rclone", Err: exec.ErrNotFound}})
+	m.Handle([]byte(`{"job_id":"job-004","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer"}`))
+	p := payloadOf(t, rec.waitResult(t, "job-004"))
+	if p["status"] != "failed" {
+		t.Fatalf("a job whose rclone did not start must fail, got %v", p["status"])
+	}
+	if code, ok := p["rclone_exit_code"]; ok {
+		t.Fatalf("rclone never ran, so the record must not carry an exit code, got %v", code)
+	}
+	if errs, _ := p["errors"].([]any); len(errs) == 0 {
+		t.Fatal("the start error must be recorded")
+	}
+}
+
+func TestHandleKeepsExitCodeWhenRcloneRan(t *testing.T) {
+	m, rec := newTestManager(fakeRunner{out: rclone.Outcome{FilesTotal: 1, FilesTransferred: 1}})
+	m.Handle([]byte(`{"job_id":"job-005","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer"}`))
+	p := payloadOf(t, rec.waitResult(t, "job-005"))
+	if code, ok := p["rclone_exit_code"]; !ok || code.(float64) != 0 {
+		t.Fatalf("a clean rclone run must record exit code 0, got %v (present %v)", code, ok)
 	}
 }
 

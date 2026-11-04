@@ -9,6 +9,19 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`rclone_exit_code` only when rclone ran.** If rclone could not start (for
+  example, not installed), the failed record used to carry exit code 0. It
+  now has no exit code; the start error is in `errors`.
+- **Version of `go install` binaries.** They reported `dev` and wrote it into
+  every record; they now take the module version from the build info.
+  Versions are reported without a leading `v`, also in the container image,
+  whose build passed the tag name (`v0.1.0`).
+- **`verify` with flags after the path.** `verify journal.jsonl --pubkey
+  k.pub` ignored the key and reported OK without checking signatures. Flags
+  are now accepted on both sides of the path; a stray argument is a usage
+  error (exit 2).
+- **Demo input folder.** `upload_folder/` is in the repository, so Docker no
+  longer creates it as root and you can put files into it.
 - **Docker demo.** `docker compose up --build` failed for everyone: the
   `minio/minio` and `minio/mc` images can no longer be pulled from Docker Hub
   or quay.io. The demo S3 target is now rclone's own S3 server
@@ -20,6 +33,15 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   restarted in a loop. A demo-only one-shot step now creates the journal file
   writable for everyone before the worker starts, which also lets
   `make verify-demo` read it from the host.
+
+### Changed
+
+- Documentation corrected after a first-use check from a fresh clone: an
+  Install section in the README, the `verify [--pubkey] <journal>` order,
+  the roadmap with the 0.2.0 milestone, the single-branch release flow in
+  `docs/RELEASE.md`, the signing-key ownership for the nonroot image in
+  `.env.example`, the published trail-evidence, and several stale
+  statements in `docs/`.
 
 ## [0.1.0] - 2026-11-02
 

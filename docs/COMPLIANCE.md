@@ -15,7 +15,7 @@
 | **Legible** | structured JSON, `schema` `trail.evidence/1`, published JSON Schemas (`schemas/`) |
 | **Contemporaneous** | `time.recorded_at` (RFC 3339 UTC) at seal time; `time.source` declared; NTP is operator responsibility (ISO 27001 8.17) |
 | **Original** | the sealed journal record is the original; hashes fix its content |
-| **Accurate** | `rclone_exit_code`, transfer counters, captured errors; optional file manifest (v0.3) |
+| **Accurate** | `rclone_exit_code`, transfer counters, captured errors; per-file manifest planned ([#2](https://github.com/RainerGewalt/trailtransfer/issues/2), milestone 0.2.0) |
 | **Complete** | completed **and** rejected jobs are recorded; journal + fsync; store-and-forward planned |
 | **Consistent** | monotonic `seq` + `prev_hash` hash chain (chronological, gap-detecting); restarts anchored and reported separately |
 | **Enduring** | append-only journal on a durable/WORM volume; new segments anchored to the last record on restart |
@@ -29,7 +29,7 @@
 | Audit trail: secure, time-stamped, computer-generated | sealed result records, hash-chained | retention store, review process |
 | Audit trail not alterable | tamper-evident chain + `verify` | WORM storage, access control |
 | Access / authority checks (Annex 11 §12) | policy allowlists; command schema | broker auth + ACL, mTLS, RBAC |
-| Electronic records retained & retrievable | JSONL journal, `verify`, export | retention period, backup |
+| Electronic records retained & retrievable | JSONL journal (copy the file to archive it), `verify` | retention period, backup |
 | Electronic signatures (Part 11 Subpart C) | optional Ed25519 record signatures (`keygen`, `verify --pubkey`) | signature policy, key management/HSM |
 | Data integrity & time | JCS hashes, RFC 3339, `time.source` | NTP; optional RFC 3161 TSA |
 
