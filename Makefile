@@ -47,7 +47,7 @@ vuln: ## Scan dependencies for known vulnerabilities
 ## ---- Demo & verification --------------------------------------------------
 
 .PHONY: demo
-demo: ## Start the Mosquitto + MinIO + worker demo (docker compose up --build)
+demo: ## Start the Mosquitto + S3 (rclone serve s3) + worker demo (docker compose up --build)
 	$(COMPOSE) up --build
 
 .PHONY: demo-down

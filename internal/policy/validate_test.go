@@ -11,7 +11,7 @@ func testPolicy() *Policy {
 		PolicyVersion:   "1",
 		AllowedActions:  []string{"copy", "move", "check"},
 		AllowedSources:  []string{"/data/input", "/data/reports"},
-		AllowedTargets:  []string{"sftp-demo:/upload", "minio-demo:trailtransfer"},
+		AllowedTargets:  []string{"sftp-demo:/upload", "s3-demo:trailtransfer"},
 		MaxParallelJobs: 2,
 		RequireJobID:    true,
 	}
@@ -69,7 +69,7 @@ func TestSyncNeedsAllowSyncDelete(t *testing.T) {
 
 func TestRequireJobID(t *testing.T) {
 	p := testPolicy() // RequireJobID: true
-	c := &commands.Command{Action: commands.ActionCopy, Source: "/data/input", Target: "minio-demo:trailtransfer"}
+	c := &commands.Command{Action: commands.ActionCopy, Source: "/data/input", Target: "s3-demo:trailtransfer"}
 	if d := p.Evaluate(c); d.Allowed {
 		t.Fatal("empty job_id must be denied when require_job_id is true")
 	}

@@ -11,7 +11,10 @@ services:
       context: .
       args:
         VERSION: dev
-    depends_on: [mqtt, minio]
+    depends_on:
+      evidence-init: { condition: service_completed_successfully }
+      mqtt: { condition: service_started }
+      s3: { condition: service_started }
     environment:
       TRAILTRANSFER_WORKER_ID: worker-01
       TRAILTRANSFER_MQTT_HOST: mqtt
@@ -26,26 +29,34 @@ services:
       - ./evidence:/data/evidence      # writable: append-only evidence journal
     restart: unless-stopped
 
+  # Demo only. Docker creates ./evidence as root, but the worker runs as
+  # nonroot and creates its journal with mode 0600, so it could neither write
+  # it nor could you read it from the host. This one-shot step creates the
+  # journal in advance and makes it writable for everyone; the worker then
+  # appends to it, and you can verify and edit it from the host. Existing
+  # records are kept. A real deployment mounts a directory owned by the
+  # worker's user instead.
+  evidence-init:
+    image: rclone/rclone:1.68
+    entrypoint: ["sh", "-c", "touch /data/evidence/journal.jsonl && chmod 0777 /data/evidence && chmod 0666 /data/evidence/journal.jsonl"]
+    volumes:
+      - ./evidence:/data/evidence
+
   mqtt:
     image: eclipse-mosquitto:2
     ports: ["1883:1883"]
     volumes:
       - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
-  minio:
-    image: minio/minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minio
-      MINIO_ROOT_PASSWORD: minio12345
-    ports: ["9000:9000", "9001:9001"]
+  # S3 target for the demo: rclone's own S3 server, from the same pinned rclone
+  # release the worker uses. Buckets are top-level directories under /data;
+  # rclone creates the demo bucket on the first copy.
+  s3:
+    image: rclone/rclone:1.68
+    command: ["serve", "s3", "/data", "--addr", ":9000", "--auth-key", "demo,demo-secret-12345"]
+    ports: ["9000:9000"]
+    volumes:
+      - s3-data:/data
 
-  # One-shot: create the demo bucket referenced by examples/worker-policy.yaml.
-  createbucket:
-    image: minio/mc
-    depends_on: [minio]
-    entrypoint: >
-      /bin/sh -c "
-      until (mc alias set local http://minio:9000 minio minio12345) do sleep 1; done;
-      mc mb -p local/trailtransfer || true;
-      "
+volumes:
+  s3-data:
