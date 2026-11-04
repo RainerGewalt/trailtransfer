@@ -2,5 +2,5 @@
   "job_id": "job-020",
   "action": "check",
   "source": "/data/input",
-  "target": "minio-demo:trailtransfer"
+  "target": "s3-demo:trailtransfer"
 }

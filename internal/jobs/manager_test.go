@@ -89,7 +89,7 @@ func newTestManager(runner Runner) (*Manager, *recorder) {
 		PolicyVersion:   "1",
 		AllowedActions:  []string{"copy"},
 		AllowedSources:  []string{"/data/input"},
-		AllowedTargets:  []string{"minio-demo:trailtransfer"},
+		AllowedTargets:  []string{"s3-demo:trailtransfer"},
 		MaxParallelJobs: 2,
 		RequireJobID:    true,
 		DryRunDefault:   true,
@@ -113,7 +113,7 @@ func payloadOf(t *testing.T, env map[string]any) map[string]any {
 
 func TestHandleCompletesValidCopy(t *testing.T) {
 	m, rec := newTestManager(fakeRunner{out: rclone.Outcome{FilesTotal: 1, FilesTransferred: 1, BytesTransferred: 100}})
-	m.Handle([]byte(`{"job_id":"job-001","action":"copy","source":"/data/input","target":"minio-demo:trailtransfer"}`))
+	m.Handle([]byte(`{"job_id":"job-001","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer"}`))
 
 	env := rec.waitResult(t, "job-001")
 	if env["schema"] != evidence.Schema || env["event_type"] != "transfer.job.result" {
@@ -142,7 +142,7 @@ func TestHandleCompletesValidCopy(t *testing.T) {
 
 func TestHandleRejectsDisallowedSource(t *testing.T) {
 	m, rec := newTestManager(fakeRunner{})
-	m.Handle([]byte(`{"job_id":"job-002","action":"copy","source":"/etc","target":"minio-demo:trailtransfer"}`))
+	m.Handle([]byte(`{"job_id":"job-002","action":"copy","source":"/etc","target":"s3-demo:trailtransfer"}`))
 	p := payloadOf(t, rec.waitResult(t, "job-002"))
 	if p["status"] != "rejected" || p["reason"] != "policy_violation" {
 		t.Fatalf("expected policy rejection, got %+v", p)
@@ -154,7 +154,7 @@ func TestHandleRejectsDisallowedSource(t *testing.T) {
 
 func TestHandleRejectsFailedExit(t *testing.T) {
 	m, rec := newTestManager(fakeRunner{out: rclone.Outcome{ExitCode: 1, Errors: []string{"boom"}}})
-	m.Handle([]byte(`{"job_id":"job-003","action":"copy","source":"/data/input","target":"minio-demo:trailtransfer"}`))
+	m.Handle([]byte(`{"job_id":"job-003","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer"}`))
 	p := payloadOf(t, rec.waitResult(t, "job-003"))
 	if p["status"] != "failed" {
 		t.Fatalf("nonzero rclone exit must fail the job, got %v", p["status"])
@@ -164,7 +164,7 @@ func TestHandleRejectsFailedExit(t *testing.T) {
 func TestDryRunDefaultApplied(t *testing.T) {
 	rr := &recordingRunner{}
 	m, rec := newTestManager(rr) // test policy has DryRunDefault: true
-	m.Handle([]byte(`{"job_id":"job-dr","action":"copy","source":"/data/input","target":"minio-demo:trailtransfer"}`))
+	m.Handle([]byte(`{"job_id":"job-dr","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer"}`))
 	rec.waitResult(t, "job-dr")
 	if !rr.called {
 		t.Fatal("runner was not invoked")
@@ -176,7 +176,7 @@ func TestDryRunDefaultApplied(t *testing.T) {
 
 func TestHandleDedupesJobID(t *testing.T) {
 	m, rec := newTestManager(fakeRunner{out: rclone.Outcome{FilesTransferred: 1}})
-	payload := []byte(`{"job_id":"job-001","action":"copy","source":"/data/input","target":"minio-demo:trailtransfer"}`)
+	payload := []byte(`{"job_id":"job-001","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer"}`)
 	m.Handle(payload)
 	rec.waitResult(t, "job-001")
 	// same job_id again -> duplicate rejection (last result on that topic)
@@ -206,7 +206,7 @@ func TestHandleDedupesJobID(t *testing.T) {
 
 func TestRejectionIsSealedAsRejectedEvent(t *testing.T) {
 	m, rec := newTestManager(fakeRunner{})
-	m.Handle([]byte(`{"job_id":"job-010","action":"copy","source":"/etc","target":"minio-demo:trailtransfer","operator":"alice"}`))
+	m.Handle([]byte(`{"job_id":"job-010","action":"copy","source":"/etc","target":"s3-demo:trailtransfer","operator":"alice"}`))
 	env := rec.waitResult(t, "job-010")
 	if env["event_type"] != "transfer.job.rejected" {
 		t.Fatalf("rejections must be sealed as transfer.job.rejected, got %v", env["event_type"])

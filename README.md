@@ -38,13 +38,12 @@ cloud, no TrailMQ. This is what makes it *audit-ready* and a building block for
 ALCOA++/GxP-style data integrity (see [`docs/EVIDENCE_MODEL.md`](docs/EVIDENCE_MODEL.md)
 and [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md)).
 
-![Terminal transcript. mosquitto_pub sends examples/commands/sync-dry-run.json. jq shows the journal record: event_type transfer.job.rejected, status rejected, detail "sync (which may delete on the target) is not permitted: allow_sync_delete is false", a chain_hash and an ed25519 signature. trailtransfer verify with the public key prints OK, 1 record, 1 signature verified. After sed changes the status to completed in a copy, trailtransfer verify prints FAIL with hash_mismatch and exits with 1.](docs/images/policy-rejection-transcript.png)
+![Two terminal transcripts. Terminal 1 runs mosquitto_sub on the job status topics and shows job-001 going from accepted to started to completed. Terminal 2 sends examples/commands/copy.json with mosquitto_pub; jq shows the journal record with seq 0, event_type transfer.job.result, status completed, 3 files, 11887 bytes and rclone exit code 0; docker compose exec s3 ls lists sample-01.png, sample-02.png and sample-03.jpg in the demo bucket; ./trailtransfer verify prints OK for 1 record.](docs/images/copy-job-transcript.png)
 
-*A local run with the example policy and a signing key (`trailtransfer
-keygen`, `TRAILTRANSFER_SIGNING_KEY`): the policy refuses a `sync` command,
-the refusal is sealed and signed in the journal, and `trailtransfer verify`
-passes the journal but fails an edited copy. rclone was not installed for
-this run; it is needed only for jobs the policy accepts.*
+*The Quickstart demo below, with three sample files in `./upload_folder`:
+the job runs through `accepted`, `started` and `completed`, its result is
+sealed in the journal, the files are in the demo S3 bucket, and
+`trailtransfer verify` checks the journal on the host.*
 
 ## What it is / is not
 
@@ -92,8 +91,13 @@ sealed **evidence record** (`seq`, `prev_hash`, `content_hash`, `chain_hash`)
 whose `payload` carries `command_hash`, `policy_version`, `policy_hash` and
 `worker_version`.
 
-> `examples/commands/copy.json` targets MinIO (bucket created by the compose
-> `createbucket` service). `examples/commands/sync-dry-run.json` is intentionally
+> `examples/commands/copy.json` copies the `.jpg` and `.png` files from
+> `./upload_folder` (mounted read-only as `/data/input`; put a few files there
+> first) to the demo S3 target `s3-demo:trailtransfer`. That target is rclone's
+> own S3 server (`rclone serve s3`) from the same pinned rclone release the
+> worker uses; rclone creates the bucket on the first copy, and
+> `docker compose exec s3 ls -l /data/trailtransfer` lists what arrived.
+> `examples/commands/sync-dry-run.json` is intentionally
 > **rejected** by the demo policy — `sync` can delete on the target, so it is
 > gated behind `allow_sync_delete` (default `false`) — to show what a policy
 > denial looks like.
@@ -105,7 +109,7 @@ whose `payload` carries `command_hash`, `policy_version`, `policy_hash` and
   "job_id": "job-001",
   "action": "copy",
   "source": "/data/input",
-  "target": "minio-demo:trailtransfer",
+  "target": "s3-demo:trailtransfer",
   "recursive": true,
   "filters": ["*.jpg", "*.png"],
   "dry_run": false
@@ -120,7 +124,8 @@ deliberately **no** `args`/`flags`/`extra` field — unknown fields are rejected
 The result is sealed as a **Trail Evidence Record v1** (`trail.evidence/1`),
 the evidence format shared by the Trail projects. Its reference specification
 and cross-implementation test vectors are maintained in the sister project
-*trail-evidence*, which is not yet published; until then
+[trail-evidence](https://github.com/RainerGewalt/trail-evidence), whose
+verifiers also check TrailTransfer journals;
 [`docs/EVIDENCE_MODEL.md`](docs/EVIDENCE_MODEL.md) describes the format as
 implemented here, [`schemas/`](schemas/) holds the JSON Schemas, and
 [`examples/events/result.completed.json`](examples/events/result.completed.json)
@@ -138,7 +143,7 @@ a full sample. Each record is chained to the previous one:
   "actor": { "auth": "self-declared", "id": "alice" },
   "policy": { "id": "worker-policy.yaml", "version": "1", "hash": "sha256:…", "kind": "transfer-policy" },
   "payload": {
-    "action": "copy", "source": "/data/input", "target": "minio-demo:trailtransfer",
+    "action": "copy", "source": "/data/input", "target": "s3-demo:trailtransfer",
     "status": "completed", "files_transferred": 10, "bytes_transferred": 12345678,
     "rclone_exit_code": 0, "policy_version": "1", "policy_hash": "sha256:…",
     "worker_version": "0.1.0", "command_hash": "sha256:…"
@@ -170,7 +175,7 @@ worker_id: worker-01
 policy_version: "1"
 allowed_actions: [copy, move, sync, check]
 allowed_sources: [/data/input, /data/reports]
-allowed_targets: [sftp-demo:/upload, minio-demo:trailtransfer]
+allowed_targets: [sftp-demo:/upload, s3-demo:trailtransfer]
 max_file_size_mb: 500
 max_parallel_jobs: 2
 allow_delete: false
@@ -184,6 +189,13 @@ require_job_id: true
 Remote **aliases** (`sftp-demo:`) resolve to `rclone.conf`, which the operator
 provides and mounts read-only. TrailTransfer never generates it and never logs
 it. See [`docs/POLICY.md`](docs/POLICY.md) for every field.
+
+![Terminal transcript. mosquitto_pub sends examples/commands/sync-dry-run.json. jq shows the journal record: event_type transfer.job.rejected, status rejected, detail "sync (which may delete on the target) is not permitted: allow_sync_delete is false", a chain_hash and an ed25519 signature. trailtransfer verify with the public key prints OK, 1 record, 1 signature verified. After sed changes the status to completed in a copy, trailtransfer verify prints FAIL with hash_mismatch and exits with 1.](docs/images/policy-rejection-transcript.png)
+
+*A local run with this policy and a signing key (`trailtransfer keygen`,
+`TRAILTRANSFER_SIGNING_KEY`): the policy refuses a `sync` command, the
+refusal is sealed and signed in the journal, and `trailtransfer verify`
+passes the journal but fails an edited copy.*
 
 ## MQTT topics
 

@@ -109,7 +109,7 @@ The current transfer command model uses direct `source` and `target` fields:
   "job_id": "job-001",
   "action": "copy",
   "source": "/data/input",
-  "target": "minio-demo:trailtransfer",
+  "target": "s3-demo:trailtransfer",
   "recursive": true,
   "filters": ["*.jpg", "*.png"],
   "dry_run": false,
@@ -292,8 +292,11 @@ demo mounts the policy and rclone configuration read-only under `/config`, the
 sample source read-only under `/data/input`, and the evidence journal directory
 writable under `/data/evidence`.
 
-The demo stack contains TrailTransfer, Mosquitto, MinIO, and a one-shot MinIO
-bucket initializer. The worker exposes no inbound HTTP or SSH service.
+The demo stack contains TrailTransfer, Mosquitto, an S3 target served by
+`rclone serve s3` from the pinned rclone image, and a one-shot step that
+creates the journal file writable for everyone, so the nonroot worker can
+append to a bind-mounted directory and the host can read it. That step is
+demo-only. The worker exposes no inbound HTTP or SSH service.
 
 ## Testing and quality gates
 
@@ -321,7 +324,7 @@ make build
 ```
 
 The Makefile exposes an `integration-test` entry point, but the repository does
-not yet contain a real integration-tagged MQTT/rclone/MinIO test suite. It must
+not yet contain a real integration-tagged MQTT/rclone/S3 test suite. It must
 not be reported as integration coverage.
 
 ## Archived legacy implementation

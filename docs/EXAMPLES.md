@@ -13,7 +13,7 @@ mosquitto_pub  -h localhost -p 1883 -t trailtransfer/worker-01/commands \
 
 | File | What it shows |
 |---|---|
-| `copy.json` | a normal `copy` job to MinIO with filters |
+| `copy.json` | a normal `copy` job to the demo S3 bucket with filters |
 | `check.json` | a non-destructive `check` (source vs. target) |
 | `cancel.json` | cancelling a running job by `target_job_id` |
 | `sync-dry-run.json` | a **policy rejection** — `sync` is gated by `allow_sync_delete` (default `false`) |
@@ -23,7 +23,7 @@ mosquitto_pub  -h localhost -p 1883 -t trailtransfer/worker-01/commands \
 ```
 jobs/job-001/status   {"status":"accepted"}
 jobs/job-001/status   {"status":"started"}
-jobs/job-001/logs     {"level":"INFO","message":"starting copy /data/input -> minio-demo:trailtransfer (dry_run=true)"}
+jobs/job-001/logs     {"level":"INFO","message":"starting copy /data/input -> s3-demo:trailtransfer (dry_run=true)"}
 jobs/job-001/result   {"schema":"trail.evidence/1","seq":7,"prev_hash":"sha256:…","event_type":"transfer.job.result",...,"payload":{"status":"completed",...,"command_hash":"sha256:…"},"content_hash":"sha256:…","chain_hash":"sha256:…","job_id":"job-001"}
 jobs/job-001/status   {"status":"completed"}
 ```

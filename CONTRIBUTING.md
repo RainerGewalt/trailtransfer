@@ -57,7 +57,7 @@ make lint      # gofmt check + go vet
 make test      # go test -race ./...
 make cover     # per-package coverage
 make build     # build ./cmd/trailtransfer
-make demo      # docker compose up --build (Mosquitto + MinIO + worker)
+make demo      # docker compose up --build (Mosquitto + S3 target + worker)
 make verify-demo   # independently verify the demo's evidence journal
 ```
 

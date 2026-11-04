@@ -7,7 +7,19 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Docker demo.** `docker compose up --build` failed for everyone: the
+  `minio/minio` and `minio/mc` images can no longer be pulled from Docker Hub
+  or quay.io. The demo S3 target is now rclone's own S3 server
+  (`rclone serve s3`) from the same pinned rclone 1.68 image the worker
+  uses; the remote is renamed from `minio-demo` to `s3-demo` in the example
+  rclone config, policy, commands and docs.
+- **Docker demo on Linux.** The worker runs as `nonroot`, but Docker created
+  `./evidence` as root, so the worker could not open its journal and
+  restarted in a loop. A demo-only one-shot step now creates the journal file
+  writable for everyone before the worker starts, which also lets
+  `make verify-demo` read it from the host.
 
 ## [0.1.0] - 2026-11-02
 

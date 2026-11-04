@@ -22,7 +22,7 @@ allowed_sources:
 # rclone.conf, where the credentials live — never here).
 allowed_targets:
   - sftp-demo:/upload
-  - minio-demo:trailtransfer
+  - s3-demo:trailtransfer
 
 max_file_size_mb: 500
 max_parallel_jobs: 2

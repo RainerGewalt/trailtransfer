@@ -9,8 +9,9 @@ the result, and independently verify the audit trail.
 docker compose up --build
 ```
 
-This starts the worker, a Mosquitto broker, MinIO (an S3 target) and creates the
-demo bucket.
+This starts the worker, a Mosquitto broker and an S3 target (rclone's own S3
+server, `rclone serve s3`), after a one-shot step that prepares
+`./evidence/journal.jsonl` so the worker can append to it and you can read it.
 
 ## 2. Watch what the worker publishes
 
@@ -39,7 +40,7 @@ allowed), and the rejection is itself a sealed, audited record:
 
 ```bash
 mosquitto_pub -h localhost -p 1883 -t trailtransfer/worker-01/commands \
-  -m '{"job_id":"demo-2","action":"copy","source":"/etc","target":"minio-demo:trailtransfer","operator":"you"}'
+  -m '{"job_id":"demo-2","action":"copy","source":"/etc","target":"s3-demo:trailtransfer","operator":"you"}'
 ```
 
 ## 4. Verify the audit trail
