@@ -7,15 +7,13 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Fixed
+## [0.1.1] - 2026-11-07
+
+### Security
 
 - **`rclone_exit_code` only when rclone ran.** If rclone could not start (for
   example, not installed), the failed record used to carry exit code 0. It
   now has no exit code; the start error is in `errors`.
-- **Version of `go install` binaries.** They reported `dev` and wrote it into
-  every record; they now take the module version from the build info.
-  Versions are reported without a leading `v`, also in the container image,
-  whose build passed the tag name (`v0.1.0`).
 - **`verify` with flags after the path.** `verify journal.jsonl --pubkey
   k.pub` ignored the key and reported OK without checking signatures. Flags
   are now accepted on both sides of the path; a stray argument is a usage
@@ -30,6 +28,13 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   journal in which signing was switched on later now fails with the key;
   start a new journal when you enable signing. Without `--pubkey` nothing
   changes.
+
+### Fixed
+
+- **Version of `go install` binaries.** They reported `dev` and wrote it into
+  every record; they now take the module version from the build info.
+  Versions are reported without a leading `v`, also in the container image,
+  whose build passed the tag name (`v0.1.0`).
 - **Demo input folder.** `upload_folder/` is in the repository, so Docker no
   longer creates it as root and you can put files into it.
 - **Docker demo.** `docker compose up --build` failed for everyone: the
@@ -150,5 +155,6 @@ First release of TrailTransfer, the Go successor of FileFlux.
   trusted time and key management remain operator responsibilities. No GxP,
   Part 11 or certification claim is made.
 
-[Unreleased]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/RainerGewalt/trailtransfer/releases/tag/v0.1.0
