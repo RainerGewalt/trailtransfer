@@ -39,7 +39,7 @@ append-only journal that `trailtransfer verify` or the independent
 check without a database, a cloud service or the broker. The chain shows
 records that were edited, removed or reordered within the journal; records cut
 off at its end need an external anchor. With a signing key,
-`verify --pubkey` checks the signatures and reports how many it verified.
+`verify --pubkey` requires a valid signature on every record.
 What the journal does not prove is in
 [`docs/EVIDENCE_MODEL.md`](docs/EVIDENCE_MODEL.md); how it relates to
 data-integrity requirements, and what the operator has to provide, is in
@@ -242,7 +242,7 @@ Job lifecycle: `received → rejected` (schema/policy) **or**
 trailtransfer run [--config config.yaml]     # start the worker
 trailtransfer validate-config [--config …]   # load config+policy, exit 0/1
 trailtransfer print-capabilities [--config …]# print the capabilities JSON
-trailtransfer verify [--pubkey key.pub] <journal>  # independently verify the evidence chain and, with a key, the signatures
+trailtransfer verify [--pubkey key.pub] <journal>  # verify the evidence chain; with a key, every record must be validly signed
 trailtransfer keygen [--out name]            # generate an Ed25519 signing key pair
 trailtransfer version
 ```

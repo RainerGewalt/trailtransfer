@@ -34,8 +34,9 @@ the S3 target from `docker-compose.yaml`, commands sent with
 `mosquitto_pub`, results read from the worker's topics and journal. These
 scenarios run inside `make first-use`: a copy with a filter, a check, two
 policy refusals, journal verification inside the container and on the host,
-an edited journal, and a worker with a signing key verified with the right
-and with a wrong public key.
+an edited journal, the unsigned demo journal checked with a key (must fail),
+and a worker with a signing key verified with the right and with a wrong
+public key.
 
 **L5 First use.** `make first-use` (`scripts/first-use.sh`) walks through the
 README and `docs/QUICKSTART.md` as a new user would and stops at the first
@@ -81,6 +82,15 @@ Recorded controls:
   in `cmdVerify` removed, `TestVerifyChecksSignaturesWhenThePubkeyFollowsThePath`,
   `TestVerifyAcceptsTheSigningKeyOnEitherSideOfThePath` and
   `TestVerifyRejectsAStrayArgument` fail; restored, all pass.
+- `verify --pubkey` with unsigned records (fixed after 0.1.0): with the
+  unsigned-record branch in `VerifyReader` removed,
+  `TestVerifyWithAKeyFailsAnUnsignedJournal`,
+  `TestVerifyWithAKeyFailsAPartiallySignedJournal` and
+  `TestVerifyWithAKeyFailsARecordWhoseSignatureWasRemoved` in
+  `internal/evidence`, and `TestVerifyWithAKeyFailsAnUnsignedJournal`,
+  `TestVerifyWithAKeyFailsAPartiallySignedJournal` and
+  `TestVerifyTellsAMissingFromAWrongSignature` in `cmd/trailtransfer` fail;
+  restored, all pass.
 - Quickstart order (fixed after 0.1.0): with the old `check.json` as the
   first command, `make first-use` fails at that step with
   `file not in S3 bucket trailtransfer`; with the corrected Quickstart it

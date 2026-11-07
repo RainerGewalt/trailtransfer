@@ -96,6 +96,25 @@ func signedJournal(t *testing.T) (journal, rightPub, wrongPub string) {
 	return journal, rightPub, wrongPub
 }
 
+// unsignedJournal writes three records without a signature.
+func unsignedJournal(t *testing.T) string {
+	t.Helper()
+	journal := filepath.Join(t.TempDir(), "journal.jsonl")
+	s, err := evidence.NewSealer(evidence.Options{ProducerID: "worker-01", ProducerVersion: "test", JournalPath: journal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= 3; i++ {
+		if _, err := s.Seal("transfer.job.result", fmt.Sprintf("job-%d", i), map[string]any{"status": "completed"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return journal
+}
+
 // The 0.1.0 regression: with --pubkey after the path the key was dropped and
 // verify reported OK without checking a single signature.
 func TestVerifyChecksSignaturesWhenThePubkeyFollowsThePath(t *testing.T) {
@@ -166,5 +185,69 @@ func TestVerifyFailsAnEditedRecord(t *testing.T) {
 	out, code := runCLI(t, "verify", edited)
 	if code != 1 || !strings.Contains(out, evidence.CodeHashMismatch) {
 		t.Fatalf("exit code %d, want 1 with %s; output:\n%s", code, evidence.CodeHashMismatch, out)
+	}
+}
+
+// With a key every record must be signed: an unsigned journal, for example
+// one rewritten by someone without the key, must not pass.
+func TestVerifyWithAKeyFailsAnUnsignedJournal(t *testing.T) {
+	_, rightPub, _ := signedJournal(t)
+	journal := unsignedJournal(t)
+	out, code := runCLI(t, "verify", journal, "--pubkey", rightPub)
+	if code != 1 || !strings.HasPrefix(out, "FAIL") || !strings.Contains(out, "0 signature(s) verified, 3 unsigned record(s)") {
+		t.Fatalf("exit code %d, want 1 with 3 unsigned records; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "record is not signed") {
+		t.Fatalf("the findings must name the missing signatures; output:\n%s", out)
+	}
+}
+
+func TestVerifyWithAKeyFailsAPartiallySignedJournal(t *testing.T) {
+	dir := t.TempDir()
+	keyPath, pubPath := writeKeyPair(t, dir, "worker")
+	signer, err := evidence.LoadSigner(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(dir, "journal.jsonl")
+	for _, sg := range []*evidence.Signer{nil, signer} {
+		s, err := evidence.NewSealer(evidence.Options{ProducerID: "worker-01", ProducerVersion: "test", JournalPath: journal, Signer: sg})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Seal("transfer.job.result", "job", map[string]any{"status": "completed"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, code := runCLI(t, "verify", "--pubkey", pubPath, journal)
+	if code != 1 || !strings.Contains(out, "1 signature(s) verified, 1 unsigned record(s)") {
+		t.Fatalf("exit code %d, want 1 with one verified and one unsigned record; output:\n%s", code, out)
+	}
+	if out, code := runCLI(t, "verify", journal); code != 0 {
+		t.Fatalf("without a key the chain is intact; exit code %d, output:\n%s", code, out)
+	}
+}
+
+// A missing signature and a signature that does not verify are different
+// problems and read differently in the report.
+func TestVerifyTellsAMissingFromAWrongSignature(t *testing.T) {
+	signed, _, wrongPub := signedJournal(t)
+	out, _ := runCLI(t, "verify", signed, "--pubkey", wrongPub)
+	if !strings.Contains(out, "signature does not verify") || strings.Contains(out, "record is not signed") {
+		t.Fatalf("a wrong key must read as a signature that does not verify; output:\n%s", out)
+	}
+	out, _ = runCLI(t, "verify", unsignedJournal(t), "--pubkey", wrongPub)
+	if !strings.Contains(out, "record is not signed") || strings.Contains(out, "signature does not verify") {
+		t.Fatalf("an unsigned record must read as not signed; output:\n%s", out)
+	}
+}
+
+func TestVerifyWithoutAKeyAcceptsAnUnsignedJournal(t *testing.T) {
+	out, code := runCLI(t, "verify", unsignedJournal(t))
+	if code != 0 || !strings.HasPrefix(out, "OK: 3 record(s)") {
+		t.Fatalf("exit code %d, want 0; output:\n%s", code, out)
 	}
 }

@@ -254,6 +254,7 @@ expect_result job-015 '"status":"rejected"' '"signature"'
 kill "$worker_pid"
 wait "$worker_pid" 2>/dev/null || true
 worker_pid=""
+run_cli 1 'record is not signed' "$tt" verify evidence/journal.jsonl --pubkey "$work/keys/worker-01.pub"
 run_cli 0 '1 signature\(s\) verified' "$tt" verify "$signed" --pubkey "$work/keys/worker-01.pub"
 run_cli 1 'signature_invalid' "$tt" verify "$signed" --pubkey "$work/keys/other.pub"
 run_cli 1 'signature_invalid' "$tt" verify --pubkey "$work/keys/other.pub" "$signed"

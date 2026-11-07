@@ -157,8 +157,17 @@ Generate a key pair and run the worker with the private key; every record is
 then signed over the **ASCII bytes of the `chain_hash` string**. The signature
 is base64url without padding. A signature shows which key sealed a record, and
 someone who can write the journal but lacks the key cannot forge one. It does
-not show which person acted, and `trailtransfer verify --pubkey` 0.1.x does not
-fail records that carry no signature at all (see the threat table below).
+not show which person acted.
+
+With `--pubkey`, every record must carry a signature that verifies with that
+key. A record without one fails with `signature_invalid` and the message
+"record is not signed", a signature that does not verify with the message
+"signature does not verify with key …"; the summary line counts the verified
+signatures and the unsigned records. A journal rewritten without signatures
+therefore does not pass with the operator's key. A journal in which signing
+was switched on later fails with the key too, so start a new journal when you
+enable signing. Without `--pubkey`, unsigned journals verify as before and
+present signatures are not checked.
 
 ```bash
 trailtransfer keygen --out worker-01           # writes worker-01.key / worker-01.pub
@@ -195,7 +204,7 @@ release does not automate.
 | A segment hidden behind a forged restart | yes | `chain_break` on the restart record |
 | Records cut off at the end of the journal | no | anchor the latest `chain_hash` outside the journal (WORM storage, RFC 3161 timestamp; neither is implemented) |
 | Whole-suffix rewrite with forged signatures | with signing | `signature_invalid` with `verify --pubkey` |
-| Whole-suffix rewrite with the signatures removed | not by `trailtransfer verify` 0.1.x | `verify --pubkey` checks only the signatures present and reports how many it verified; compare that number with the record count, or use `trail-evidence verify --pubkey key.pub --require-signatures`, which fails unsigned records |
+| Whole-suffix rewrite with the signatures removed | with signing | `signature_invalid` ("record is not signed") with `verify --pubkey`, which requires a valid signature on every record |
 | Which key sealed a record | with signing | Ed25519 signature with `key_id`; the key belongs to the worker, not to a person |
 | Content of the transferred files | partial | `command_hash` fixes the instruction; a file manifest is planned |
 

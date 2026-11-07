@@ -185,3 +185,75 @@ func fmtSscanf(s string, b *byte) (int, error) {
 	*b = byte(v)
 	return 1, err
 }
+
+// With a key every record must be signed. A journal written, or rewritten,
+// without signatures must not pass with the operator's key.
+func TestVerifyWithAKeyFailsAnUnsignedJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "journal.jsonl")
+	sealN(t, path, 3)
+	pub, _, _ := ed25519.GenerateKey(nil)
+
+	rep, err := Verify(path, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.OK || rep.Unsigned != 3 || rep.SignaturesChecked != 0 || rep.Count(CodeSignatureInvalid) != 3 {
+		t.Fatalf("an unsigned journal must fail with a key: %+v", rep)
+	}
+	for _, f := range rep.Findings {
+		if f.Code == CodeSignatureInvalid && f.Message != "record is not signed" {
+			t.Fatalf("a missing signature must be reported as missing: %+v", f)
+		}
+	}
+	// Without a key the same journal is a valid unsigned chain.
+	if rep, _ := Verify(path, nil); !rep.OK || rep.Unsigned != 0 {
+		t.Fatalf("an unsigned journal must pass without a key: %+v", rep)
+	}
+}
+
+// Signing switched on after records were written: the earlier records cannot
+// pass a signature check, the later ones are verified.
+func TestVerifyWithAKeyFailsAPartiallySignedJournal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "journal.jsonl")
+	sealN(t, path, 2)
+	s, pub := signedSealer(t, dir, path)
+	for i := 0; i < 2; i++ {
+		if _, err := s.Seal("transfer.job.result", "", map[string]any{"n": i}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Close()
+
+	rep, _ := Verify(path, pub)
+	if rep.OK || rep.Unsigned != 2 || rep.SignaturesChecked != 2 || rep.Count(CodeSignatureInvalid) != 2 {
+		t.Fatalf("two unsigned and two signed records: %+v %s", rep, codes(rep))
+	}
+	if rep, _ := Verify(path, nil); !rep.OK || !rep.Signed {
+		t.Fatalf("without a key the chain is intact: %+v", rep)
+	}
+}
+
+// The rewrite the check closes: a journal writer changes a record, removes
+// its signature and re-seals the hashes. The chain stays consistent; only the
+// key exposes it.
+func TestVerifyWithAKeyFailsARecordWhoseSignatureWasRemoved(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "journal.jsonl")
+	s, pub := signedSealer(t, dir, path)
+	_, _ = s.Seal("transfer.job.result", "", map[string]any{"amount": 1}, nil)
+	_, _ = s.Seal("transfer.job.result", "", map[string]any{"amount": 2}, nil)
+	s.Close()
+
+	reseal(t, path, 1, func(r *Record) {
+		r.Payload = []byte(`{"amount":999999}`)
+		r.Signature = nil
+	})
+	if rep, _ := Verify(path, nil); !rep.OK {
+		t.Fatalf("the re-sealed chain must pass without a key: %+v %s", rep, codes(rep))
+	}
+	rep, _ := Verify(path, pub)
+	if rep.OK || rep.Unsigned != 1 || rep.SignaturesChecked != 1 || rep.Count(CodeHashMismatch) != 0 {
+		t.Fatalf("only the missing signature may expose the rewrite: %+v %s", rep, codes(rep))
+	}
+}

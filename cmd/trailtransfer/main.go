@@ -66,7 +66,8 @@ Commands:
   run                 start the worker
   validate-config     load config + policy, report validity, exit 0/1
   print-capabilities  print the capabilities event as JSON
-  verify <journal>    independently verify an evidence journal (--pubkey to check signatures), exit 0/1
+  verify <journal>    independently verify an evidence journal, exit 0/1
+                      (--pubkey key.pub: every record must carry a valid signature)
   keygen [--out name] generate an Ed25519 signing key pair (<name>.key/.pub)
   version             print the worker version
 
@@ -261,6 +262,9 @@ func cmdVerify(args []string) {
 	switch {
 	case pub != nil:
 		fmt.Printf(", %d signature(s) verified", rep.SignaturesChecked)
+		if rep.Unsigned > 0 {
+			fmt.Printf(", %d unsigned record(s)", rep.Unsigned)
+		}
 	case rep.Signed:
 		fmt.Print(", records are signed (pass --pubkey to verify signatures)")
 	}
