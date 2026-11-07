@@ -5,7 +5,8 @@
 
 <h1 align="center">TrailTransfer</h1>
 
-**MQTT-controlled rclone worker for audit-ready edge file transfers.**
+**Controlled file transfers at the edge: policy-restricted rclone jobs over
+MQTT, with every outcome recorded in a verifiable journal.**
 
 [![CI](https://github.com/RainerGewalt/trailtransfer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/RainerGewalt/trailtransfer/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/RainerGewalt/trailtransfer.svg)](https://pkg.go.dev/github.com/RainerGewalt/trailtransfer)
@@ -21,8 +22,8 @@ TrailTransfer does **not** replace rclone — rclone stays the transfer engine.
 TrailTransfer is the MQTT control plane, policy layer, job manager and evidence
 wrapper around it.
 
-> Works with any MQTT broker. TrailMQ can add fleet governance, contracts and
-> centralized evidence — but is never required.
+> Works with any MQTT broker. No TrailMQ, database or cloud service is
+> required.
 
 ```
 MQTT command in
@@ -32,11 +33,17 @@ MQTT command in
   → sealed, hash-chained evidence record  →  trailtransfer verify
 ```
 
-Every finished job (success **or** rejection) is sealed into a tamper-evident,
-append-only journal and can be **independently verified** — no database, no
-cloud, no TrailMQ. This is what makes it *audit-ready* and a building block for
-ALCOA++/GxP-style data integrity (see [`docs/EVIDENCE_MODEL.md`](docs/EVIDENCE_MODEL.md)
-and [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md)).
+Every finished job, completed **or** rejected, is sealed into a hash-chained,
+append-only journal that `trailtransfer verify` or the independent
+[trail-evidence](https://github.com/RainerGewalt/trail-evidence) verifiers
+check without a database, a cloud service or the broker. The chain shows
+records that were edited, removed or reordered within the journal; records cut
+off at its end need an external anchor. With a signing key,
+`verify --pubkey` checks the signatures and reports how many it verified.
+What the journal does not prove is in
+[`docs/EVIDENCE_MODEL.md`](docs/EVIDENCE_MODEL.md); how it relates to
+data-integrity requirements, and what the operator has to provide, is in
+[`docs/COMPLIANCE.md`](docs/COMPLIANCE.md).
 
 ![Two terminal transcripts. Terminal 1 runs mosquitto_sub on the job status topics and shows job-001 going from accepted to started to completed. Terminal 2 sends examples/commands/copy.json with mosquitto_pub; jq shows the journal record with seq 0, event_type transfer.job.result, status completed, 3 files, 11887 bytes and rclone exit code 0; docker compose exec s3 ls lists sample-01.png, sample-02.png and sample-03.jpg in the demo bucket; ./trailtransfer verify prints OK for 1 record.](docs/images/copy-job-transcript.png)
 
@@ -48,7 +55,7 @@ sealed in the journal, the files are in the demo S3 bucket, and
 ## What it is / is not
 
 **It is:** an MQTT-controlled edge transfer worker · a policy-guarded rclone
-runner · an audit-ready job executor · a TrailMQ-native worker.
+runner · a job executor with a verifiable journal.
 
 **It is not:** a replacement for rclone · a remote shell · an unrestricted file
 manager · an enterprise MFT suite · a cloud service.
@@ -59,7 +66,7 @@ manager · an enterprise MFT suite · a cloud service.
   script author wrote, and leave no trustworthy record of *what actually ran*.
   TrailTransfer validates every job against a local policy, forbids arbitrary
   rclone flags, and seals each outcome — success **or** rejection — into a
-  tamper-evident, independently verifiable evidence record.
+  hash-chained record that can be verified independently.
 - **vs. SSH / remote shell:** a shell on an edge box is unlimited authority.
   TrailTransfer exposes **no inbound port** and **no shell**; it holds a single
   outbound MQTT connection and only ever runs a fixed, allowlisted rclone action
@@ -91,14 +98,15 @@ The GitHub release has no prebuilt binaries yet.
 docker compose up --build
 ```
 
-In another terminal, watch everything the worker publishes, then send a command:
+Put a few `.jpg` or `.png` files into `./upload_folder`. In another terminal,
+watch everything the worker publishes, then send a copy job:
 
 ```bash
 mosquitto_sub -h localhost -p 1883 -v -t 'trailtransfer/worker-01/#'
 
 mosquitto_pub  -h localhost -p 1883 \
   -t trailtransfer/worker-01/commands \
-  -f examples/commands/check.json
+  -f examples/commands/copy.json
 ```
 
 You'll see `accepted → started → … → completed` on the job's topics, ending in a
@@ -107,12 +115,13 @@ whose `payload` carries `command_hash`, `policy_version`, `policy_hash` and
 `worker_version`.
 
 > `examples/commands/copy.json` copies the `.jpg` and `.png` files from
-> `./upload_folder` (mounted read-only as `/data/input`; put a few files there
-> first) to the demo S3 target `s3-demo:trailtransfer`. That target is rclone's
-> own S3 server (`rclone serve s3`) from the same pinned rclone release the
-> worker uses; rclone creates the bucket on the first copy, and
+> `./upload_folder` (mounted read-only as `/data/input`) to the demo S3 target
+> `s3-demo:trailtransfer`. That target is rclone's own S3 server
+> (`rclone serve s3`) from the same pinned rclone release the worker uses;
+> rclone creates the bucket on the first copy, and
 > `docker compose exec s3 ls -l /data/trailtransfer` lists what arrived.
-> `examples/commands/sync-dry-run.json` is intentionally
+> `examples/commands/check.json` then compares the same files on both sides
+> and completes when they match. `examples/commands/sync-dry-run.json` is intentionally
 > **rejected** by the demo policy — `sync` can delete on the target, so it is
 > gated behind `allow_sync_delete` (default `false`) — to show what a policy
 > denial looks like.
@@ -249,21 +258,20 @@ A YAML config is optional; `TRAILTRANSFER_*` env vars override it (see
 MQTT commands are untrusted; the local policy is authoritative. No shell
 execution, no arbitrary rclone flags, no secrets in logs, no unrestricted
 paths/remotes. Duplicate `job_id`s are deduplicated; `max_parallel_jobs` bounds
-concurrency; a JCS hash chain (`content_hash`/`chain_hash`) backs a verifiable audit trail. See
+concurrency; a JCS hash chain (`content_hash`/`chain_hash`) links every outcome
+to the one before it. See
 [`SECURITY.md`](SECURITY.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## TrailMQ integration
+## Using it with TrailMQ
 
-TrailTransfer executes controlled file jobs; TrailMQ governs and proves them —
-registering the worker as an expected system, managing pub/sub rights, capturing
-result events as evidence, and rendering transfers on a timeline. It's purely
-additive: TrailTransfer runs against any broker on its own.
-
-```
-TrailSource   → emits context-rich source events
-TrailTransfer → moves files as controlled jobs
-TrailMQ       → governs & proves both
-```
+TrailTransfer is a standard MQTT client and needs no TrailMQ. Connected to
+[TrailMQ](https://github.com/RainerGewalt/TrailMQ), a policy-controlled MQTT
+broker, the broker decides per role and topic rule whether the worker may
+subscribe to its command topic and publish its events, and records each of
+those decisions with identity, action, topic, outcome and reason. TrailMQ does
+not read or verify the TrailTransfer journal; that stays with
+`trailtransfer verify` and the
+[trail-evidence](https://github.com/RainerGewalt/trail-evidence) verifiers.
 
 ## Build & test
 

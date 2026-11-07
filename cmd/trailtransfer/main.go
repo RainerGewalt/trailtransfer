@@ -1,5 +1,5 @@
 // Command trailtransfer is an MQTT-controlled, policy-guarded rclone worker for
-// audit-ready edge file transfers.
+// edge file transfers that seals every outcome in a verifiable journal.
 //
 // Usage:
 //
@@ -60,7 +60,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `trailtransfer — MQTT-controlled rclone worker for audit-ready edge file transfers
+	fmt.Fprint(os.Stderr, `trailtransfer — MQTT-controlled rclone worker for edge file transfers with a verifiable journal
 
 Commands:
   run                 start the worker

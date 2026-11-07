@@ -1,7 +1,7 @@
 # TrailTransfer Product and Open-Source Strategy
 
-> **Product claim:** MQTT-controlled rclone worker for audit-ready edge file
-> transfers.
+> **Product claim:** controlled file transfers at the edge: policy-restricted
+> rclone jobs over MQTT, with every outcome recorded in a verifiable journal.
 
 This document explains the product intent, boundaries, and open-source strategy
 for TrailTransfer. It is not a protocol specification. The normative technical
@@ -35,8 +35,7 @@ observability, and independently verifiable evidence.
 The product is designed for edge, OT, IIoT, and self-hosted environments where
 systems should make outbound connections but should not expose SSH, an HTTP API,
 or a general remote-command surface. It works with any standards-compliant MQTT
-broker. TrailMQ can add fleet governance and centralized evidence, but it is not
-required.
+broker; TrailMQ is not required.
 
 ## The problem
 
@@ -257,16 +256,12 @@ backup and restore, change control, SOPs, and periodic audit-trail review. See
 TrailTransfer must remain fully useful with a standard MQTT broker such as
 Mosquitto, EMQX, or HiveMQ. TrailMQ integration is optional and additive.
 
-```text
-TrailSource   -> emits context-rich source events
-TrailTransfer -> executes governed transfer jobs
-TrailMQ       -> adds fleet governance, contracts, and centralized evidence
-```
-
-A governance layer can register expected workers, manage publication and
-subscription rights, validate topic contracts, retain results, and present job
-history. It does not replace the worker's local policy and must not become a
-prerequisite for safe standalone operation.
+Connected to TrailMQ, the broker already decides per role and topic rule
+which topics the worker may subscribe to and publish on, and records those
+decisions. Registering expected workers, validating topic contracts, retaining
+results and presenting job history are ideas for a later governance layer, not
+current TrailMQ features. None of them may replace the worker's local policy or
+become a prerequisite for safe standalone operation.
 
 ## Open-source strategy
 

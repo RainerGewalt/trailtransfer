@@ -2,5 +2,6 @@
   "job_id": "job-020",
   "action": "check",
   "source": "/data/input",
-  "target": "s3-demo:trailtransfer"
+  "target": "s3-demo:trailtransfer",
+  "filters": ["*.jpg", "*.png"]
 }

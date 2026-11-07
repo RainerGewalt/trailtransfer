@@ -1,8 +1,9 @@
 # Evidence Model
 
-TrailTransfer turns each terminal job outcome into a **tamper-evident,
-independently verifiable record**. This is what makes transfers *audit-ready*
-rather than just logged. It needs no database, no cloud, and no TrailMQ.
+TrailTransfer turns each terminal job outcome into a **hash-chained,
+independently verifiable record**, so that a transfer leaves a record whose
+later changes can be detected, not only a log line. Verification needs no
+database, no cloud and no broker.
 
 The record format is the **Trail Evidence Record v1** (`trail.evidence/1`),
 the shared evidence format of the Trail projects. Its reference specification
@@ -154,8 +155,10 @@ finding. An auditor runs it against the file alone.
 
 Generate a key pair and run the worker with the private key; every record is
 then signed over the **ASCII bytes of the `chain_hash` string**. The signature
-is base64url without padding. Signing gives non-repudiation and defeats a
-whole-suffix rewrite by someone who can write the journal but lacks the key.
+is base64url without padding. A signature shows which key sealed a record, and
+someone who can write the journal but lacks the key cannot forge one. It does
+not show which person acted, and `trailtransfer verify --pubkey` 0.1.x does not
+fail records that carry no signature at all (see the threat table below).
 
 ```bash
 trailtransfer keygen --out worker-01           # writes worker-01.key / worker-01.pub
@@ -190,8 +193,10 @@ release does not automate.
 | A record altered | yes | `hash_mismatch` |
 | A record deleted, inserted or reordered | yes | `chain_break` and `seq_gap` |
 | A segment hidden behind a forged restart | yes | `chain_break` on the restart record |
-| Whole-suffix rewrite by a journal writer | with signing | `signature_invalid`; also anchor the latest `chain_hash` externally (WORM, TSA, TrailMQ) |
-| Non-repudiation of origin | with signing | Ed25519 signature with `key_id` |
+| Records cut off at the end of the journal | no | anchor the latest `chain_hash` outside the journal (WORM storage, RFC 3161 timestamp; neither is implemented) |
+| Whole-suffix rewrite with forged signatures | with signing | `signature_invalid` with `verify --pubkey` |
+| Whole-suffix rewrite with the signatures removed | not by `trailtransfer verify` 0.1.x | `verify --pubkey` checks only the signatures present and reports how many it verified; compare that number with the record count, or use `trail-evidence verify --pubkey key.pub --require-signatures`, which fails unsigned records |
+| Which key sealed a record | with signing | Ed25519 signature with `key_id`; the key belongs to the worker, not to a person |
 | Content of the transferred files | partial | `command_hash` fixes the instruction; a file manifest is planned |
 
 ## Pre-release format

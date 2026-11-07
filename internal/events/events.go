@@ -42,7 +42,7 @@ type ProgressEvent struct {
 	Timestamp        string  `json:"timestamp"`
 }
 
-// ResultEvent is the audit-ready receipt for a job. It is the basis for
+// ResultEvent is the receipt for a job. It is the basis for
 // downstream evidence. result_hash is computed over this struct with the field
 // left empty (it is omitempty), then filled in before publishing.
 type ResultEvent struct {

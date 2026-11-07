@@ -39,7 +39,7 @@ type Config struct {
 	EvidenceJournal string `yaml:"evidence_journal"`
 
 	// SigningKey is a PEM Ed25519 private key path. When set, every sealed record
-	// is signed (non-repudiation). Empty = unsigned chain.
+	// is signed with it. Empty = unsigned chain.
 	SigningKey string `yaml:"signing_key"`
 
 	MaxParallelJobs       int    `yaml:"max_parallel_jobs"`

@@ -201,11 +201,7 @@ wait_for "$mqtt_log" "^$TOPIC/capabilities " "retained capabilities message"
 ok "retained health and capabilities"
 
 # ---------------------------------------------------------------------------
-step "Send the documented check command (Quickstart 3)"
-send -f examples/commands/check.json
-expect_result job-020 '"status":"completed"'
-
-step "Own use case: copy two own files, a third one stays out by filter (README, copy.json)"
+step "Own files: copy two images, a third file stays out by filter (Quickstart 3, copy.json)"
 head -c 2048 /dev/urandom >upload_folder/first-use-1.png
 head -c 3072 /dev/urandom >upload_folder/first-use-2.jpg
 printf 'not an image\n' >upload_folder/first-use-notes.txt
@@ -216,6 +212,10 @@ grep -qx first-use-1.png <<<"$listing" && grep -qx first-use-2.jpg <<<"$listing"
 	fail "the copied files are not in the demo bucket: $listing"
 grep -q first-use-notes.txt <<<"$listing" && fail "the filter let first-use-notes.txt through: $listing"
 ok "bucket holds first-use-1.png and first-use-2.jpg, not first-use-notes.txt"
+
+step "Check that source and target match (Quickstart 3, check.json)"
+send -f examples/commands/check.json
+expect_result job-020 '"status":"completed"'
 
 step "Refused by policy (README: sync-dry-run.json; Quickstart 3: source /etc)"
 send -f examples/commands/sync-dry-run.json

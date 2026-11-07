@@ -16,7 +16,7 @@
 | **Contemporaneous** | `time.recorded_at` (RFC 3339 UTC) at seal time; `time.source` declared; NTP is operator responsibility (ISO 27001 8.17) |
 | **Original** | the sealed journal record is the original; hashes fix its content |
 | **Accurate** | `rclone_exit_code`, transfer counters, captured errors; per-file manifest planned ([#2](https://github.com/RainerGewalt/trailtransfer/issues/2), milestone 0.2.0) |
-| **Complete** | completed **and** rejected jobs are recorded; journal + fsync; store-and-forward planned |
+| **Complete** | completed **and** rejected jobs are recorded; journal + fsync. Not yet: an outcome is lost if the worker crashes before it is sealed (durable job state and outbox planned in [#1](https://github.com/RainerGewalt/trailtransfer/issues/1)), and records cut off at the end of the journal are not detectable without an external anchor |
 | **Consistent** | monotonic `seq` + `prev_hash` hash chain (chronological, gap-detecting); restarts anchored and reported separately |
 | **Enduring** | append-only journal on a durable/WORM volume; new segments anchored to the last record on restart |
 | **Available** | `trailtransfer verify` + the plain-text journal; readable without any service |
@@ -27,10 +27,10 @@
 | Expectation | TrailTransfer | Operator provides |
 |---|---|---|
 | Audit trail: secure, time-stamped, computer-generated | sealed result records, hash-chained | retention store, review process |
-| Audit trail not alterable | tamper-evident chain + `verify` | WORM storage, access control |
+| Audit trail not alterable | changes are detectable through the hash chain and `verify`, not prevented; see the threat table in `EVIDENCE_MODEL.md` | WORM storage, access control |
 | Access / authority checks (Annex 11 §12) | policy allowlists; command schema | broker auth + ACL, mTLS, RBAC |
 | Electronic records retained & retrievable | JSONL journal (copy the file to archive it), `verify` | retention period, backup |
-| Electronic signatures (Part 11 Subpart C) | optional Ed25519 record signatures (`keygen`, `verify --pubkey`) | signature policy, key management/HSM |
+| Electronic signatures (Part 11 Subpart C) | not provided: the optional Ed25519 signatures (`keygen`, `verify --pubkey`) are machine signatures of the worker's key, not a person's electronic signature | signature process, key management/HSM |
 | Data integrity & time | JCS hashes, RFC 3339, `time.source` | NTP; optional RFC 3161 TSA |
 
 *Indicative only — not a gap assessment. Map against your own SOPs.*
@@ -40,7 +40,7 @@
 TrailTransfer is small, deterministic and testable (see `go test ./...` and
 `docs/EVIDENCE_MODEL.md`). For validation: treat it as configurable software,
 trace your **user requirements** to the policy + MQTT contract + evidence model,
-and use `verify` and the example commands as **OQ** evidence. `policy_version` /
+and decide whether `verify` and the example commands can serve as test evidence in your own qualification. `policy_version` /
 `policy_hash` and `worker_version` in every record support change control.
 
 ## Standards referenced
@@ -54,9 +54,10 @@ Schema 2020-12.
 
 ## Shared responsibility (summary)
 
-**TrailTransfer provides:** canonical hashing, hash-chained tamper-evident
-records, append-only journal, independent `verify`, policy enforcement + policy
-hash, structured/versioned events, JSON Schemas.
+**TrailTransfer provides:** canonical hashing, hash-chained records whose
+changes `verify` detects within the limits of `EVIDENCE_MODEL.md`, an
+append-only journal, policy enforcement + policy hash, structured/versioned
+events, JSON Schemas.
 
 **The operator provides:** NTP time sync; broker authentication, ACLs and TLS/mTLS;
 a WORM/immutable retention store and retention/disposal policy; backups; key
