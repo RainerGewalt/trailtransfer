@@ -278,6 +278,7 @@ not read or verify the TrailTransfer journal; that stays with
 ```bash
 go build ./cmd/trailtransfer
 go test ./...
+make first-use   # README and Quickstart from a fresh clone, see docs/TESTING.md
 ```
 
 ## Roadmap

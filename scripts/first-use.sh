@@ -96,7 +96,7 @@ run_cli() {
 	if out="$("$@" 2>&1)"; then code=0; else code=$?; fi
 	[[ $code == "$want" ]] || fail "$* exited $code, want $want; output: $out"
 	grep -Eq -- "$pattern" <<<"$out" || fail "$* did not print /$pattern/; output: $out"
-	ok "$(head -n 1 <<<"$out")  [exit $code: $*]"
+	ok "$(head -n 1 <<<"$out")  [exit $code: ${*//$work/<work>}]"
 }
 
 send() { mosquitto_pub -h localhost -p 1883 -t "$TOPIC/commands" "$@" || fail "mosquitto_pub $*"; }
