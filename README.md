@@ -309,6 +309,18 @@ commit conventions, [`CHANGELOG.md`](CHANGELOG.md) for the release history, and
 [`docs/`](docs/) for the architecture, policy, MQTT contract and evidence model.
 Report vulnerabilities privately per [`SECURITY.md`](SECURITY.md).
 
+## Feedback and support
+
+Tried it? An
+[evaluation report](https://github.com/RainerGewalt/trailtransfer/issues/new?template=evaluation-report.yml)
+helps more than anything else: what you ran, whether it worked, and what got
+in the way. A first run that failed is as useful as one that worked. Bugs can
+also go into a plain issue. Vulnerabilities go to [SECURITY.md](SECURITY.md), not to a
+public issue.
+
+Support is best effort: issues are read and answered, but there is no
+guaranteed response time, no support contract, no SLA and no paid support.
+
 ## License
 
 Apache-2.0 (see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE)). rclone is invoked
