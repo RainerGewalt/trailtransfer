@@ -1,8 +1,9 @@
 # Product Model
 
-**TrailTransfer is an MQTT-controlled rclone worker for audit-ready edge file
-transfers.** It turns rclone into a policy-guarded, observable, evidence-oriented
-transfer worker.
+**TrailTransfer runs controlled file transfers at the edge: policy-restricted
+rclone jobs over MQTT, with every outcome recorded in a verifiable journal.** It
+turns rclone into a policy-guarded, observable, evidence-oriented transfer
+worker.
 
 ## Core flow
 
@@ -20,7 +21,7 @@ MQTT command in
 - Constrained by a **local policy** (allowlists + guards).
 - A **controlled runner of rclone** — rclone stays the transfer engine.
 - A publisher of **status / progress / result / logs / health / capabilities**.
-- **Standalone** against any MQTT broker; later **observable/auditable** by TrailMQ.
+- **Standalone** against any MQTT broker, TrailMQ included.
 
 ## What it is not
 
@@ -39,11 +40,11 @@ a subprocess instead of reimplementing transfers.
 
 ## Ecosystem
 
-```
-TrailSource   → emits context-rich source events
-TrailTransfer → moves files as controlled jobs
-TrailMQ       → governs & proves both (optional, additive)
-```
+TrailSource reads OPC UA sources and TrailTransfer moves files; both write
+Trail Evidence Records that the
+[trail-evidence](https://github.com/RainerGewalt/trail-evidence) verifiers
+check. TrailMQ is a policy-controlled MQTT broker both can connect to as
+ordinary MQTT clients; it does not read their journals.
 
 See [`CONCEPT.md`](CONCEPT.md) for the full product/OSS strategy and
 [`ARCHITECTURE.md`](ARCHITECTURE.md) for the technical blueprint.

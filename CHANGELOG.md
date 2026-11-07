@@ -20,6 +20,16 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   k.pub` ignored the key and reported OK without checking signatures. Flags
   are now accepted on both sides of the path; a stray argument is a usage
   error (exit 2).
+- **`verify --pubkey` passed unsigned journals.** With a key, a journal
+  without any signature was reported as OK with "0 signature(s) verified",
+  so someone who could rewrite the journal passed the check with the
+  operator's key. With `--pubkey` every record must now carry a valid
+  signature: a missing one fails with `signature_invalid` ("record is not
+  signed"), the same code and message as the trail-evidence verifiers with
+  `--require-signatures`, and the summary counts the unsigned records. A
+  journal in which signing was switched on later now fails with the key;
+  start a new journal when you enable signing. Without `--pubkey` nothing
+  changes.
 - **Demo input folder.** `upload_folder/` is in the repository, so Docker no
   longer creates it as root and you can put files into it.
 - **Docker demo.** `docker compose up --build` failed for everyone: the
@@ -33,6 +43,25 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   restarted in a loop. A demo-only one-shot step now creates the journal file
   writable for everyone before the worker starts, which also lets
   `make verify-demo` read it from the host.
+- **Quickstart.** Its first command, `examples/commands/check.json`, failed
+  on every fresh stack (`file not in S3 bucket trailtransfer`): the demo
+  bucket did not exist yet, and the check compared every file in
+  `upload_folder/`. The Quickstart now copies your images first and then
+  checks them; `check.json` uses the same filters as `copy.json`.
+
+### Added
+
+- **`make first-use`** (`scripts/first-use.sh`): walks through the README and
+  the Quickstart from a fresh clone, or with `RELEASE=x.y.z` against the
+  published tag, `go install` and image, and stops at the first step that
+  does not behave as documented. Testing levels in `docs/TESTING.md`.
+- **Command-line tests for `verify`**: a wrong key before or after the path
+  fails with `signature_invalid`, the right key passes on either side, a
+  stray argument is a usage error, an edited record fails with
+  `hash_mismatch`, and without a key the output says that signatures were
+  not checked. With a key, unsigned, partially signed and re-sealed journals
+  without signatures fail, and a missing signature reads differently from
+  one that does not verify.
 
 ### Changed
 
@@ -42,6 +71,13 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
   `docs/RELEASE.md`, the signing-key ownership for the nonroot image in
   `.env.example`, the published trail-evidence, and several stale
   statements in `docs/`.
+- Wording on evidence, compliance and TrailMQ made exact: no "audit-ready"
+  or "non-repudiation"; the README and `docs/EVIDENCE_MODEL.md` say what the
+  chain detects and what it does not (records cut off at the end of the
+  journal); `docs/COMPLIANCE.md` no longer maps the
+  worker's machine signatures to Part 11 electronic signatures; the TrailMQ
+  section describes only what TrailMQ does today (role and topic decisions
+  for the worker's MQTT traffic) and says that it does not read the journal.
 
 ## [0.1.0] - 2026-11-02
 

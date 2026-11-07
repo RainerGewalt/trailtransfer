@@ -54,6 +54,10 @@ demo: ## Start the Mosquitto + S3 (rclone serve s3) + worker demo (docker compos
 demo-down: ## Stop and remove demo containers
 	$(COMPOSE) down -v
 
+.PHONY: first-use
+first-use: ## First-use check (docs/TESTING.md, L5): README and Quickstart from a fresh clone; RELEASE=x.y.z checks the published release
+	RELEASE=$(RELEASE) ./scripts/first-use.sh
+
 .PHONY: verify-demo
 verify-demo: build ## Independently verify the evidence journal produced by the demo
 	@test -f $(JOURNAL) || { echo "no journal at $(JOURNAL) — run 'make demo' and send a command first"; exit 1; }

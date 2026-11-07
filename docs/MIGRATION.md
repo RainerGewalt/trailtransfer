@@ -5,8 +5,8 @@
 FileFlux was a Rust "super-fast-smb-image-uploader": an MQTT-driven worker that
 implemented SMB/SFTP uploads itself, with a `start`/`stop` command model and
 random per-run job IDs. It has been transformed into **TrailTransfer**, a
-**Go** worker that orchestrates **rclone** under a local policy and emits
-audit-ready evidence events.
+**Go** worker that orchestrates **rclone** under a local policy and seals
+every outcome as a verifiable evidence record.
 
 The active runtime is now **Go only**. The Rust sources are retained as a
 migration reference under [`legacy/rust/`](../legacy/rust/) and are **not** a

@@ -45,6 +45,7 @@ type VerifyReport struct {
 	OK                bool // no finding other than restarts
 	Signed            bool // at least one record carried a signature
 	SignaturesChecked int  // records whose signature was verified with pub
+	Unsigned          int  // records without a signature, counted only when pub is given
 	Restarts          int  // records with chain_restart=true
 	Findings          []Finding
 }
@@ -74,14 +75,22 @@ var actorAuths = map[string]bool{"broker-authenticated": true, "self-declared": 
 // and, when pub is given, verifies the signature. It needs nothing but the
 // file.
 //
+// Without pub, unsigned records are fine and present signatures are not
+// checked. With pub, every record must carry a signature that verifies with
+// it: a missing signature is signature_invalid with the message "record is not
+// signed", the same code and message the trail-evidence verifiers use with
+// --require-signatures, and it is counted in Unsigned so that the report can
+// tell missing from invalid signatures.
+//
 // Every record is checked; one damaged record does not hide later ones. After
 // a record the walk continues from that record's own chain_hash and seq, so a
 // single break produces a single finding.
 //
 // An unsigned chain detects modification, deletion and reordering. An actor
 // who can rewrite the whole suffix of the journal can still forge a consistent
-// chain; signatures close that gap, as does anchoring the latest chain_hash in
-// external immutable storage.
+// chain; verifying with pub closes that gap, because the forger has no key to
+// sign it and cannot leave the signatures out. Records cut off at the end of
+// the journal need an anchor of the latest chain_hash outside the journal.
 func Verify(journalPath string, pub ed25519.PublicKey) (VerifyReport, error) {
 	f, err := os.Open(journalPath)
 	if err != nil {
@@ -169,7 +178,8 @@ func VerifyReader(r io.Reader, pub ed25519.PublicKey) (VerifyReport, error) {
 			}
 		}
 
-		if rec.Signature != nil {
+		switch {
+		case rec.Signature != nil:
 			rep.Signed = true
 			if pub != nil {
 				if err := VerifySignature(pub, rec.ChainHash, rec.Signature); err != nil {
@@ -178,6 +188,12 @@ func VerifyReader(r io.Reader, pub ed25519.PublicKey) (VerifyReport, error) {
 					rep.SignaturesChecked++
 				}
 			}
+		case pub != nil:
+			// Asked to check signatures, an unsigned record cannot pass: a
+			// journal rewritten without signatures would otherwise verify
+			// with the operator's key.
+			rep.Unsigned++
+			rep.add(idx, seq, CodeSignatureInvalid, "record is not signed")
 		}
 
 		prev = rec.ChainHash
