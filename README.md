@@ -81,13 +81,13 @@ manager · an enterprise MFT suite · a cloud service.
 
 - **Container image** for linux/amd64 and linux/arm64, with rclone 1.68
   inside, running as `nonroot`:
-  `docker pull ghcr.io/rainergewalt/trailtransfer:0.1.0`. Mount config,
+  `docker pull ghcr.io/rainergewalt/trailtransfer:0.1.1`. Mount config,
   policy and `rclone.conf` under `/config` as `docker-compose.yaml` does.
 - **Go 1.26 or newer:**
   `go install github.com/RainerGewalt/trailtransfer/cmd/trailtransfer@latest`.
   Transfer jobs need `rclone` on the `PATH`; without it the worker starts,
   reports `rclone_available: false` and fails transfer jobs. A binary built
-  this way from v0.1.0 reports its version as `dev`; main fixes that.
+  this way reports the module version, for example `0.1.1`.
 - **From a clone:** `make build`, or `go build ./cmd/trailtransfer`.
 
 The GitHub release has no prebuilt binaries yet.
@@ -289,6 +289,10 @@ make first-use   # README and Quickstart from a fresh clone, see docs/TESTING.md
   Record v1 (RFC 8785 hashing, `seq`/`prev_hash` **hash chain**, restart
   anchoring, append-only journal, `trailtransfer verify`, JSON Schemas) and
   optional **Ed25519 signatures** (`keygen`, `verify --pubkey`).
+- **v0.1.1** *(released 2026-11-07)* — security fixes in `verify` (a key
+  after the path was ignored; with `--pubkey`, unsigned records now fail),
+  `rclone_exit_code` only when rclone ran, a working Docker demo and
+  Quickstart, and `make first-use`.
 - **0.2.0** ([milestone](https://github.com/RainerGewalt/trailtransfer/milestone/1))
   — survive crashes with durable job state, deduplication and an MQTT outbox
   (#1); a per-file transfer manifest as its own evidence record (#2); a
