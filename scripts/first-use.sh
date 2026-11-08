@@ -262,12 +262,21 @@ run_cli 0 'pass --pubkey to verify signatures' "$tt" verify "$signed"
 
 # ---------------------------------------------------------------------------
 step "Independent verifier trail-evidence (L3)"
-if command -v trail-evidence >/dev/null 2>&1; then
-	run_cli 0 '^VALID' trail-evidence verify evidence/journal.jsonl
-	run_cli 0 '^VALID' trail-evidence verify "$signed" --pubkey "$work/keys/worker-01.pub" --require-signatures
-	run_cli 1 '^INVALID' trail-evidence verify "$work/edited.jsonl"
-else
-	echo "    skipped: trail-evidence is not on PATH (go install github.com/RainerGewalt/trail-evidence/go/cmd/trail-evidence@latest)"
+TE_VERSION="${TRAIL_EVIDENCE_VERSION:-v0.2.1}"
+te=trail-evidence
+if ! command -v trail-evidence >/dev/null 2>&1; then
+	if GOBIN="$work/bin" go install "github.com/RainerGewalt/trail-evidence/go/cmd/trail-evidence@$TE_VERSION" 2>"$work/trail-evidence-install.log"; then
+		te="$work/bin/trail-evidence"
+		ok "trail-evidence $TE_VERSION installed into $work/bin for this run"
+	else
+		te=""
+		echo "    skipped: trail-evidence is not on PATH and go install …@$TE_VERSION failed (see $work/trail-evidence-install.log)"
+	fi
+fi
+if [[ -n $te ]]; then
+	run_cli 0 '^VALID' "$te" verify evidence/journal.jsonl
+	run_cli 0 '^VALID' "$te" verify "$signed" --pubkey "$work/keys/worker-01.pub" --require-signatures
+	run_cli 1 '^INVALID' "$te" verify "$work/edited.jsonl"
 fi
 
 if [[ -n $RELEASE ]]; then
