@@ -95,6 +95,14 @@ Recorded controls:
   first command, `make first-use` fails at that step with
   `file not in S3 bucket trailtransfer`; with the corrected Quickstart it
   passes.
+- `make first-use`, step "Independent verifier trail-evidence (L3)": the
+  step installs the pinned trail-evidence (`TRAIL_EVIDENCE_VERSION`,
+  default v0.2.1) into the run's own `bin/`, checks the reported version
+  and verifies the journals with it; a verifier already on PATH is not
+  used. Control: `TRAIL_EVIDENCE_VERSION=v0.0.0-missing make first-use`
+  fails at that step with `go install trail-evidence@v0.0.0-missing
+  failed … cannot be skipped` (exit 1); with the default it passes. Before
+  this change the step printed `skipped` and the run ended green.
 
 ## Commands
 
