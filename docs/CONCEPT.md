@@ -98,8 +98,8 @@ TrailTransfer is intended for:
 - operators modernizing access to existing NAS, SFTP, or object-storage
   systems without replacing them;
 - self-hosted users replacing scattered scripts with observable jobs; and
-- regulated or quality-sensitive environments that need verifiable technical
-  records as part of a validated process.
+- teams that want a record of each transfer job whose later changes can be
+  detected, without running a database or a cloud service for it.
 
 Representative workloads include moving inspection images to object storage,
 delivering batch reports to a controlled share, collecting diagnostic bundles,
@@ -115,7 +115,9 @@ senders, QoS 1 supports at-least-once delivery for commands and results, and
 retained health and capability events make current worker state discoverable.
 
 MQTT is a transport, not an authorization system inside TrailTransfer. Broker
-authentication, ACLs, and TLS or mTLS remain deployment responsibilities.
+authentication and ACLs remain deployment responsibilities. The worker connects
+over plain TCP and has no TLS support, so the broker belongs on the same host
+or a trusted network segment, or is reached through a tunnel.
 
 ### rclone
 
@@ -147,9 +149,9 @@ with terminal transfer results.
 
 Destructive semantics must be understood explicitly:
 
-- `move` asks rclone to remove source objects after successful transfer. In the
-  current policy model it must be deliberately included in `allowed_actions`;
-  operators should leave it disabled unless source deletion is intended.
+- `move` asks rclone to remove source objects after successful transfer. It
+  must be included in `allowed_actions` and is additionally denied unless
+  `allow_delete` is enabled.
 - `sync` can remove target objects to make the target match the source. It must
   be included in `allowed_actions` and is additionally denied unless
   `allow_sync_delete` is enabled.
@@ -176,11 +178,12 @@ Incoming MQTT payloads are untrusted. Security depends on layered controls:
    a shell.
 5. Backend credentials remain in an operator-provided, read-only
    `rclone.conf`; commands and events refer to remote aliases instead.
-6. Captured rclone errors are redacted before publication, and commands use
-   configured remote aliases rather than embedded credentials.
-7. Deployment controls such as a non-root container, read-only mounts, broker
-   TLS, and least-privilege filesystem permissions limit impact if another
-   control fails.
+6. Captured rclone errors pass a pattern filter for credential assignments
+   before publication, and commands use configured remote aliases rather than
+   embedded credentials.
+7. Deployment controls such as a non-root container, read-only mounts, a
+   broker on a trusted network path, and least-privilege filesystem
+   permissions limit impact if another control fails.
 
 TrailTransfer does not turn a command's `operator` field into authenticated
 identity. That value is self-declared because MQTT 3.1.1 subscribers do not
@@ -188,10 +191,12 @@ receive the publisher's authenticated broker identity. Strong attribution must
 come from broker ACLs, mTLS identity, an external governance layer, or a future
 authenticated command mechanism.
 
-The current source and target allowlists are application controls, not a
-replacement for operating-system isolation. Operators should expose only the
-required source data and configuration to the worker. Further containment and
-recovery hardening remains part of the runtime roadmap.
+The source and target allowlists are application controls, not a replacement
+for operating-system isolation. Sources and targets are normalised before the
+comparison, parent segments in any spelling are refused, and local symbolic
+links are resolved; links behind a remote alias cannot be, because the worker
+does not read `rclone.conf`. Operators should expose only the required source
+data and configuration to the worker.
 
 See [`SECURITY_POLICY.md`](SECURITY_POLICY.md) and the repository
 [`SECURITY.md`](../SECURITY.md) for the maintained security model and private
@@ -224,9 +229,11 @@ restart. Reviewers can run
 `trailtransfer keygen` and `verify --pubkey` provide the implemented signing and
 signature-verification workflow.
 
-These controls make records tamper-evident; they do not make mutable storage
-immutable. An operator that needs durable retention must provide protected or
-WORM storage, access control, backups, and a review process. Signature assurance
+These controls make later changes to the records detectable; they do not make
+mutable storage immutable. An operator that needs durable retention must
+provide protected or WORM storage, access control, backups, and a review
+process; [`EVIDENCE_MODEL.md`](EVIDENCE_MODEL.md) lists what the operator
+provides. Signature assurance
 depends on private-key protection and rotation. The current system clock must
 be disciplined by the deployment, and the current evidence does not yet include
 a per-file cryptographic manifest. Durable MQTT publication during broker
@@ -234,22 +241,6 @@ outages is also future work.
 
 The complete format and its limits are documented in
 [`EVIDENCE_MODEL.md`](EVIDENCE_MODEL.md).
-
-## Compliance position
-
-TrailTransfer is not "GMP compliant," "Part 11 certified," or a substitute for
-validation. Compliance is a property of a deployed system operated under
-controlled procedures.
-
-TrailTransfer provides technical controls that can support an ALCOA++-oriented
-data-integrity program: structured records, policy and command hashes,
-hash-chained evidence, optional signatures, independent verification, and
-versioned contracts.
-
-The operator remains responsible for system validation, broker identity and
-authorization, time synchronization, key management, immutable retention,
-backup and restore, change control, SOPs, and periodic audit-trail review. See
-[`COMPLIANCE.md`](COMPLIANCE.md) for the shared-responsibility mapping.
 
 ## Standalone operation and the Trail ecosystem
 
@@ -265,10 +256,9 @@ become a prerequisite for safe standalone operation.
 
 ## Open-source strategy
 
-Transparency is part of the product's trust model. Operators in edge and
-regulated environments need to inspect the code, build it internally, run it
-without a cloud account, and retain an operational path independent of a
-vendor. The command boundary, policy evaluation, evidence construction, and
+Transparency is part of the product's trust model. Operators of edge systems
+need to inspect the code, build it internally, run it without a cloud account,
+and retain an operational path independent of a vendor. The command boundary, policy evaluation, evidence construction, and
 verification logic therefore belong in the open-source core.
 
 TrailTransfer uses the Apache License 2.0. It provides a permissive adoption
@@ -276,12 +266,9 @@ model and an explicit patent grant that is familiar to industrial users. rclone
 is invoked as a separate MIT-licensed subprocess and retains its own license;
 the container image includes its binary under that license.
 
-The project should not place security, evidence, or backend capabilities behind
-a closed feature gate. Sustainable commercial work may include support,
-deployment hardening, integration, training, security review, and validation
-documentation tailored to an operator's environment. Revenue should come from
-expertise and service, not from weakening the usefulness of the open-source
-core.
+The project does not place security, evidence, or backend capabilities behind
+a closed feature gate. Support is best effort through GitHub issues; there is
+no paid support and no service offering.
 
 Contributions use small, reviewable changes, English Conventional Commits, and
 tests for behavior changes. Security-sensitive changes require explicit threat
@@ -298,13 +285,14 @@ append-only journal, independent verification, and optional Ed25519 signing.
 
 The next work should remain in coherent, reviewable slices:
 
-1. Strengthen destructive-action controls and source/target containment.
-2. Make job-ID deduplication and terminal-result state durable across restarts.
+1. Make job-ID deduplication and terminal-result state durable across restarts,
+   and record jobs that are interrupted by a stop.
+2. Decide how the worker reaches a broker over an untrusted network (TLS).
 3. Add a durable MQTT outbox and broker-outage recovery.
 4. Extend evidence with a per-file manifest, trusted timestamps, external
    anchoring or WORM export, and documented key rotation and revocation.
 5. Harden release engineering with stable schemas, supply-chain attestations,
-   vulnerability scanning, and deployment and validation guidance.
+   vulnerability scanning, and deployment guidance.
 
 The roadmap does not include a general delete API, remote shell, arbitrary
 rclone arguments, custom transfer backends, embedded broker, required cloud

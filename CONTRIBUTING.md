@@ -38,9 +38,11 @@ These are security invariants. A PR that violates any of them will not be merged
   rejected) plus local policy enforcement are mandatory.
 - **No secrets in logs, events, tests or docs.** Backend credentials live only in
   the operator-provided, read-only `rclone.conf` and are referenced by alias.
-- **No GMP / 21 CFR Part 11 certification claims.** TrailTransfer *supports* data
-  integrity and validated use; compliance is achieved by the operator's validated
-  process. See [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md).
+- **No compliance, certification or validation claims.** Documentation
+  describes what the code does and where it stops, with a test or a
+  reproducible scenario behind each security statement (see
+  [`SECURITY.md`](SECURITY.md)); it does not map TrailTransfer to regulatory
+  frameworks.
 - **TrailMQ stays optional.** TrailTransfer must remain fully usable against any
   standards-compliant MQTT broker.
 - **Evidence stays verifiable.** Preserve the JCS hashing, `content_hash`,

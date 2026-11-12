@@ -47,6 +47,11 @@ type Sealer struct {
 	journal        *os.File
 	signer         *Signer
 	now            func() time.Time
+
+	// failed is the first journal write error. After it the journal may end
+	// in a partial line and no longer match the in-memory chain, so every
+	// later Seal fails with it until the process restarts.
+	failed error
 }
 
 // NewSealer builds a sealer. If a journal path is set the journal is opened
@@ -137,9 +142,17 @@ func (s *Sealer) Signed() bool {
 // JournalEnabled reports whether records are persisted durably.
 func (s *Sealer) JournalEnabled() bool { return s.journal != nil }
 
+// Err returns the journal write error that stopped the sealer, or nil.
+func (s *Sealer) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.failed
+}
+
 // Seal wraps payload in a record, links it into the chain, appends it to the
 // journal (if enabled, fsync'd) and returns the marshalled record to publish.
-// actor may be nil, which records auth "none". jobID is optional.
+// actor may be nil, which records auth "none". jobID is optional. Once a
+// journal write has failed, Seal fails for the rest of the process.
 func (s *Sealer) Seal(eventType, jobID string, payload any, actor *Actor) (json.RawMessage, error) {
 	pb, err := json.Marshal(payload)
 	if err != nil {
@@ -156,6 +169,9 @@ func (s *Sealer) Seal(eventType, jobID string, payload any, actor *Actor) (json.
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.failed != nil {
+		return nil, fmt.Errorf("evidence journal unavailable since an earlier write failed: %w", s.failed)
+	}
 
 	rec := Record{
 		Schema:      Schema,
@@ -191,10 +207,12 @@ func (s *Sealer) Seal(eventType, jobID string, payload any, actor *Actor) (json.
 	}
 	if s.journal != nil {
 		if _, err := s.journal.Write(append(out, '\n')); err != nil {
-			return nil, err
+			s.failed = fmt.Errorf("write %s: %w", s.journal.Name(), err)
+			return nil, s.failed
 		}
 		if err := s.journal.Sync(); err != nil {
-			return nil, err
+			s.failed = fmt.Errorf("sync %s: %w", s.journal.Name(), err)
+			return nil, s.failed
 		}
 	}
 	s.nextSeq = rec.Seq + 1

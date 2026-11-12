@@ -2,15 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/RainerGewalt/trailtransfer/schemas/command.schema.json",
   "title": "TrailTransfer command",
-  "description": "A command published to trailtransfer/{worker_id}/commands. The schema is closed: no additional properties are allowed (no free-form rclone args).",
+  "description": "A command published to trailtransfer/{worker_id}/commands. The schema is closed: no additional properties are allowed (no free-form rclone args). A command payload larger than 65536 bytes is rejected.",
   "type": "object",
   "additionalProperties": false,
   "required": ["job_id", "action"],
   "properties": {
     "job_id": {
       "type": "string",
-      "minLength": 1,
-      "description": "Client-supplied unique job id. Required; deduplicated by the worker."
+      "pattern": "^[A-Za-z0-9._-]{1,128}$",
+      "description": "Client-supplied unique job id. Required. It becomes one level of the job's MQTT topics, so only 1 to 128 characters from A-Z, a-z, 0-9, '.', '_' and '-' are accepted; a command with any other job_id is logged and dropped without an answer. Deduplicated by the worker while it runs."
     },
     "action": {
       "type": "string",
@@ -39,7 +39,8 @@
     },
     "target_job_id": {
       "type": "string",
-      "description": "The job to act on. Required for action=cancel and action=status."
+      "pattern": "^[A-Za-z0-9._-]{1,128}$",
+      "description": "The job to act on. Required for action=cancel and action=status. Same character set as job_id."
     },
     "operator": {
       "type": "string",

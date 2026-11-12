@@ -9,7 +9,8 @@
 #                                   GitHub, go install …@v0.1.1, GHCR image 0.1.1
 #
 # It needs what the README asks of a user: git, Go 1.26 or newer, Docker with
-# Compose v2, mosquitto_pub and mosquitto_sub, and free ports 1883 and 9000.
+# Compose v2, mosquitto_pub and mosquitto_sub, and free ports 1883 and 9000
+# (the Compose variables MQTT_PORT and S3_PORT move them).
 # If the independent verifier trail-evidence is on PATH, the journals are also
 # checked with it (L3); otherwise that step says it was skipped.
 #
@@ -76,6 +77,9 @@ cleanup() {
 trap cleanup EXIT
 
 need() { command -v "$1" >/dev/null 2>&1 || fail "$1 is not installed: $2"; }
+# Host ports of the demo stack, as docker-compose.yaml reads them.
+export MQTT_PORT="${MQTT_PORT:-1883}" S3_PORT="${S3_PORT:-9000}"
+
 port_in_use() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
 
 # wait_for FILE PATTERN WHAT: wait until FILE has a line matching PATTERN.
@@ -99,7 +103,7 @@ run_cli() {
 	ok "$(head -n 1 <<<"$out")  [exit $code: ${*//$work/<work>}]"
 }
 
-send() { mosquitto_pub -h localhost -p 1883 -t "$TOPIC/commands" "$@" || fail "mosquitto_pub $*"; }
+send() { mosquitto_pub -h localhost -p "$MQTT_PORT" -t "$TOPIC/commands" "$@" || fail "mosquitto_pub $*"; }
 
 # result JOB: wait for the job's result event and print it.
 result() {
@@ -129,10 +133,10 @@ gov="$(go env GOVERSION)"
 gomin="${gov#go1.}"
 gomin="${gomin%%.*}"
 [[ $gomin =~ ^[0-9]+$ && $gomin -ge 26 ]] || fail "Go $gov is older than the documented 1.26"
-for port in 1883 9000; do
-	port_in_use "$port" && fail "port $port is in use; the demo stack publishes MQTT on 1883 and S3 on 9000"
+for port in "$MQTT_PORT" "$S3_PORT"; do
+	port_in_use "$port" && fail "port $port is in use; the demo stack publishes MQTT on $MQTT_PORT and S3 on $S3_PORT (MQTT_PORT and S3_PORT move them)"
 done
-ok "git, docker compose, $gov, mosquitto clients; ports 1883 and 9000 free"
+ok "git, docker compose, $gov, mosquitto clients; ports $MQTT_PORT and $S3_PORT free"
 
 # ---------------------------------------------------------------------------
 step "Get the code"
@@ -185,14 +189,14 @@ else
 		fail "docker compose up with $IMAGE:$RELEASE: $(tail -n 10 "$work/compose-up.log")"
 fi
 for ((i = 0; i < WAIT * 5; i++)); do
-	port_in_use 1883 && break
+	port_in_use "$MQTT_PORT" && break
 	sleep 0.2
 done
-port_in_use 1883 || fail "the broker did not accept connections on 1883 within ${WAIT}s"
+port_in_use "$MQTT_PORT" || fail "the broker did not accept connections on $MQTT_PORT within ${WAIT}s"
 ok "stack started"
 
 step "Watch what the worker publishes (Quickstart 2)"
-mosquitto_sub -h localhost -p 1883 -v -t "$TOPIC/#" >"$mqtt_log" 2>&1 &
+mosquitto_sub -h localhost -p "$MQTT_PORT" -v -t "$TOPIC/#" >"$mqtt_log" 2>&1 &
 sub_pid=$!
 # The retained health message shows both that the subscription is active and
 # that the worker is online.
@@ -241,7 +245,7 @@ mkdir -p "$work/keys" "$work/signed"
 signed="$work/signed/journal.jsonl"
 TRAILTRANSFER_WORKER_ID=worker-01 \
 	TRAILTRANSFER_MQTT_HOST=localhost \
-	TRAILTRANSFER_MQTT_PORT=1883 \
+	TRAILTRANSFER_MQTT_PORT="$MQTT_PORT" \
 	TRAILTRANSFER_POLICY_FILE=config/worker-policy.example.yaml \
 	TRAILTRANSFER_RCLONE_CONFIG=config/rclone.conf.example \
 	TRAILTRANSFER_EVIDENCE_JOURNAL="$signed" \

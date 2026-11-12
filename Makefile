@@ -54,6 +54,10 @@ demo: ## Start the Mosquitto + S3 (rclone serve s3) + worker demo (docker compos
 demo-down: ## Stop and remove demo containers
 	$(COMPOSE) down -v
 
+.PHONY: negative-paths
+negative-paths: ## Negative-path scenarios without Docker (docs/TESTING.md, L4); needs mosquitto and rclone; NEG_PORT (default 15931)
+	./scripts/negative-paths.sh
+
 .PHONY: first-use
 first-use: ## First-use check (docs/TESTING.md, L5): README and Quickstart from a fresh clone; RELEASE=x.y.z checks the published release
 	RELEASE=$(RELEASE) ./scripts/first-use.sh

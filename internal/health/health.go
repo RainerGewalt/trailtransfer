@@ -16,6 +16,9 @@ import (
 type Reporter interface {
 	ActiveCount() int
 	SupportedActions() []string
+	// Health returns "healthy", or "unhealthy" with the reason the worker
+	// refuses jobs.
+	Health() (status, detail string)
 }
 
 // StartLoop publishes an immediate heartbeat and then one every interval until
@@ -23,8 +26,10 @@ type Reporter interface {
 func StartLoop(ctx context.Context, pub *events.Publisher, pol *policy.Policy, r Reporter, rcloneBinary string, interval time.Duration) {
 	start := time.Now()
 	emit := func() {
+		status, detail := r.Health()
 		pub.Health(events.HealthEvent{
-			Status:           "healthy",
+			Status:           status,
+			Detail:           detail,
 			UptimeSeconds:    int64(time.Since(start).Seconds()),
 			ActiveJobs:       r.ActiveCount(),
 			MaxParallelJobs:  pol.MaxParallelJobs,

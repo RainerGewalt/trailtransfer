@@ -32,6 +32,25 @@ Each result is wrapped in a **record** and linked to the previous one, so
 removing, altering or reordering any record breaks the chain and is detected
 by `verify`.
 
+## What gets a record
+
+A record is written for every job the worker finishes while it runs:
+completed, failed and cancelled jobs (`transfer.job.result`) and jobs refused
+by the schema or the policy (`transfer.job.rejected`). There is no record in
+these cases:
+
+- a command without a `job_id`, or with one that is not 1 to 128 characters
+  from `A-Z a-z 0-9 . _ -`: it has no topic to be answered on and is logged
+  and dropped;
+- a job that is still running when the worker stops (durable job state is
+  planned in [#1](https://github.com/RainerGewalt/trailtransfer/issues/1));
+- an outcome that cannot be written to the journal: the worker then
+  publishes nothing unsealed, logs the error, reports `unhealthy` and refuses
+  every further job until it is restarted, so the gap is visible instead of
+  growing.
+
+Status queries and cancel commands are control actions and are not sealed.
+
 ## The record
 
 ```json
@@ -67,7 +86,7 @@ by `verify`.
 | `time` | `recorded_at` = sealing time in RFC 3339 UTC; `source` = `system` |
 | `actor` | `auth` `self-declared` with `id` = the command's `operator`, or `auth` `none` |
 | `policy` | `id` = `policy_id` from the config (default: the policy file name), `version` = `policy_version`, `hash` = SHA-256 of the policy file bytes, `kind` `transfer-policy` |
-| `payload` | the result event, unchanged, including `command_hash` and `worker_version` |
+| `payload` | the result event, unchanged, including `command_hash` and `worker_version`; for a job that ran also `dry_run` and, under a size limit, `max_file_size_mb` (see below) |
 | `content_hash` | `SHA-256(JCS(payload))` |
 | `chain_hash` | `SHA-256(JCS(core))`, see below |
 | `job_id` | the job's id, for lookup; not part of the core |
@@ -93,6 +112,24 @@ by `verify`.
   payload enters through `content_hash`; `job_id`, `signature` and `context`
   are outside the core.
 - **Hashes** are written as `sha256:` followed by 64 lowercase hex characters.
+
+## What the payload says about a run
+
+- `source` and `target` are the normalised form that the policy checked and
+  rclone received (repeated `/`, `.` segments and a trailing `/` removed);
+  `command_hash` is the hash of the command as it arrived.
+- `dry_run` is `true` when rclone ran with `--dry-run`. A dry run transfers
+  nothing, so `files_transferred` and `bytes_transferred` are 0 and
+  `files_total` counts the files rclone would have transferred. Records
+  written by 0.1.1 and earlier have no `dry_run` and count a dry run like a
+  transfer.
+- `max_file_size_mb` is present when the policy's limit applied. rclone
+  skips larger files without an error and without counting them, so a
+  `completed` record with this field may have left files behind.
+- `files_transferred`, `bytes_transferred` and `rclone_exit_code` are what
+  rclone reported. They are not a check of the files at the target; a
+  per-file manifest is planned in
+  [#2](https://github.com/RainerGewalt/trailtransfer/issues/2).
 
 ## Restarts
 
@@ -125,13 +162,27 @@ within one process lifetime only; enable the journal for durable evidence.
 ```bash
 trailtransfer verify /data/evidence/journal.jsonl
 # OK: 42 record(s), 3 restart(s)                       (exit 0)
+#   restart            3
+# not checked:
+#   - signatures: the records are not signed
+#   - records cut off after the last record, or a journal replaced as a whole: compare the last chain_hash with a copy kept outside the journal
+#   - the transferred files themselves: the journal holds no file manifest
+#
 # FAIL: 42 record(s), 3 restart(s)                     (exit 1)
 #   hash_mismatch      1
 #   chain_break        1
 #   seq_gap            1
 #   - record #17 (seq 17): hash_mismatch: content_hash does not match payload
 #   …
+#
+# EMPTY: 0 record(s), nothing was verified; …          (exit 1)
 ```
+
+After the verdict, `verify` lists what it did not check. If the first record
+of the file is a restart anchored at a `chain_hash` other than genesis, the
+file starts in the middle of the stream: `verify` notes "previous segment not
+in this journal", because the records before it are not there to check. A
+file without records is `EMPTY` with exit code 1, not `OK`.
 
 `verify` walks the file in order and, for every record, checks
 
@@ -188,9 +239,9 @@ release does not automate.
   strong attribution is a broker or governance responsibility: broker ACLs,
   mTLS, MQTT 5 user properties, or TrailMQ. The record says so in
   `actor.auth`.
-- **time.source** is `system`. For regulated use keep the host on NTP
-  (ISO/IEC 27001:2022 control 8.17). Trusted timestamps (RFC 3161) and the
-  `tsa` source are not implemented.
+- **time.source** is `system`: `recorded_at` is the host clock at sealing
+  time, so keep the host clock synchronised, for example with NTP. Trusted
+  timestamps (RFC 3161) and the `tsa` source are not implemented.
 - The chain proves integrity and order of the records TrailTransfer wrote. It
   does not prove the content of the transferred files; a per-file manifest is
   future work.
@@ -202,11 +253,32 @@ release does not automate.
 | A record altered | yes | `hash_mismatch` |
 | A record deleted, inserted or reordered | yes | `chain_break` and `seq_gap` |
 | A segment hidden behind a forged restart | yes | `chain_break` on the restart record |
+| Records cut off at the start of the journal, up to a restart | noted | the chain is intact, so the verdict is `OK`; `verify` notes "previous segment not in this journal"; whether records were removed needs an anchor outside the journal |
 | Records cut off at the end of the journal | no | anchor the latest `chain_hash` outside the journal (WORM storage, RFC 3161 timestamp; neither is implemented) |
+| The journal replaced as a whole by a new one | no | a new journal starts at genesis like a fresh worker; only an anchor outside the journal shows the difference |
+| An empty journal | yes | `EMPTY`, exit code 1 |
 | Whole-suffix rewrite with forged signatures | with signing | `signature_invalid` with `verify --pubkey` |
 | Whole-suffix rewrite with the signatures removed | with signing | `signature_invalid` ("record is not signed") with `verify --pubkey`, which requires a valid signature on every record |
 | Which key sealed a record | with signing | Ed25519 signature with `key_id`; the key belongs to the worker, not to a person |
-| Content of the transferred files | partial | `command_hash` fixes the instruction; a file manifest is planned |
+| Content of the transferred files | no | `command_hash` fixes the instruction and the counters are rclone's; a file manifest is planned ([#2](https://github.com/RainerGewalt/trailtransfer/issues/2)) |
+
+## What the operator provides
+
+The journal makes later changes detectable; it does not prevent them, and it
+does not keep itself. A deployment that relies on the journal needs, from the
+operator:
+
+- a synchronised host clock;
+- broker authentication and ACLs, so that only authorised senders can publish
+  commands, and a trusted network path to the broker (the worker has no TLS,
+  see [`../SECURITY.md`](../SECURITY.md));
+- storage for the journal that the worker can append to and others cannot
+  rewrite, for example a WORM volume, plus backups and a retention period;
+- a copy of the latest `chain_hash` outside the journal when records cut off
+  at the end must be detectable;
+- protection, rotation and distribution of the signing key, if signing is
+  used;
+- a process for reviewing the journal with `trailtransfer verify`.
 
 ## Pre-release format
 

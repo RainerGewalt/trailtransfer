@@ -26,7 +26,12 @@ type StatusEvent struct {
 	WorkerID  string `json:"worker_id"`
 	Status    string `json:"status"`
 	Detail    string `json:"detail,omitempty"`
-	Timestamp string `json:"timestamp"`
+	// TargetJobID and TargetStatus answer a status query: the queried job
+	// and its last known status (accepted, started, completed, failed,
+	// cancelled, rejected or unknown). Only on the query's own topic.
+	TargetJobID  string `json:"target_job_id,omitempty"`
+	TargetStatus string `json:"target_status,omitempty"`
+	Timestamp    string `json:"timestamp"`
 }
 
 // ProgressEvent is a lossy, high-volume progress sample (QoS 0).
@@ -46,19 +51,27 @@ type ProgressEvent struct {
 // downstream evidence. result_hash is computed over this struct with the field
 // left empty (it is omitempty), then filled in before publishing.
 type ResultEvent struct {
-	EventType        string   `json:"event_type"`
-	JobID            string   `json:"job_id"`
-	WorkerID         string   `json:"worker_id"`
-	Action           string   `json:"action,omitempty"`
-	Source           string   `json:"source,omitempty"`
-	Target           string   `json:"target,omitempty"`
-	Status           string   `json:"status"`
-	Reason           string   `json:"reason,omitempty"`
-	Detail           string   `json:"detail,omitempty"`
-	Justification    string   `json:"justification,omitempty"` // human "why", from command.reason
-	StartedAt        string   `json:"started_at,omitempty"`
-	FinishedAt       string   `json:"finished_at,omitempty"`
-	DurationMS       int64    `json:"duration_ms,omitempty"`
+	EventType     string `json:"event_type"`
+	JobID         string `json:"job_id"`
+	WorkerID      string `json:"worker_id"`
+	Action        string `json:"action,omitempty"`
+	Source        string `json:"source,omitempty"`
+	Target        string `json:"target,omitempty"`
+	Status        string `json:"status"`
+	Reason        string `json:"reason,omitempty"`
+	Detail        string `json:"detail,omitempty"`
+	Justification string `json:"justification,omitempty"` // human "why", from command.reason
+	StartedAt     string `json:"started_at,omitempty"`
+	FinishedAt    string `json:"finished_at,omitempty"`
+	DurationMS    int64  `json:"duration_ms,omitempty"`
+	// DryRun is set for every job that ran: true when rclone ran with
+	// --dry-run. A dry run transfers nothing, so files_transferred and
+	// bytes_transferred are 0 and files_total counts the files rclone would
+	// have transferred. Absent on rejections.
+	DryRun *bool `json:"dry_run,omitempty"`
+	// MaxFileSizeMB is the policy's max_file_size_mb when rclone ran with it:
+	// files larger than this many MiB were excluded and are not counted.
+	MaxFileSizeMB    int      `json:"max_file_size_mb,omitempty"`
 	FilesTotal       int      `json:"files_total"`
 	FilesTransferred int      `json:"files_transferred"`
 	BytesTransferred int64    `json:"bytes_transferred"`
@@ -82,8 +95,11 @@ type LogEvent struct {
 
 // HealthEvent is the retained heartbeat.
 type HealthEvent struct {
-	EventType        string   `json:"event_type"`
+	EventType string `json:"event_type"`
+	// Status is healthy, unhealthy (the worker refuses jobs, Detail says
+	// why), stopped, or offline (the Last Will).
 	Status           string   `json:"status"`
+	Detail           string   `json:"detail,omitempty"`
 	WorkerID         string   `json:"worker_id"`
 	Version          string   `json:"version"`
 	UptimeSeconds    int64    `json:"uptime_seconds"`

@@ -4,7 +4,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -61,7 +64,9 @@ func defaults() *Config {
 }
 
 // Load reads the optional YAML file at path (skipped if empty), overlays
-// TRAILTRANSFER_* environment variables, applies defaults and validates.
+// TRAILTRANSFER_* environment variables, applies defaults and validates. An
+// unknown or misspelt key in the file is an error, so that a typo cannot
+// leave the journal or signing switched off without notice.
 func Load(path string) (*Config, error) {
 	c := defaults()
 
@@ -70,7 +75,9 @@ func Load(path string) (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read config %q: %w", path, err)
 		}
-		if err := yaml.Unmarshal(raw, c); err != nil {
+		dec := yaml.NewDecoder(bytes.NewReader(raw))
+		dec.KnownFields(true)
+		if err := dec.Decode(c); err != nil && !errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("parse config %q: %w", path, err)
 		}
 	}

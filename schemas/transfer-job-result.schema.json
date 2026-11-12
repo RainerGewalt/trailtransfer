@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/RainerGewalt/trailtransfer/schemas/transfer-job-result.schema.json",
   "title": "TrailTransfer sealed job result",
-  "description": "The record TrailTransfer publishes to trailtransfer/{worker_id}/jobs/{job_id}/result and appends to its evidence journal: a Trail Evidence Record v1 whose payload is the job result. Every terminal outcome is sealed, including rejections.",
+  "description": "The record TrailTransfer publishes to trailtransfer/{worker_id}/jobs/{job_id}/result and appends to its evidence journal: a Trail Evidence Record v1 whose payload is the job result. Completed, failed, cancelled and rejected jobs with a valid job_id are sealed; a result that cannot be sealed is not published. docs/EVIDENCE_MODEL.md lists the cases without a record.",
   "allOf": [
     { "$ref": "trail-evidence-record.schema.json" },
     {
@@ -31,6 +31,8 @@
             "started_at": { "type": "string", "format": "date-time" },
             "finished_at": { "type": "string", "format": "date-time" },
             "duration_ms": { "type": "integer", "minimum": 0 },
+            "dry_run": { "type": "boolean", "description": "Present on every job that ran (absent on rejections): true when rclone ran with --dry-run. A dry run transfers nothing: files_transferred and bytes_transferred are 0, and files_total counts the files rclone would have transferred. Added in 0.1.2; records written by 0.1.1 and earlier do not carry it." },
+            "max_file_size_mb": { "type": "integer", "minimum": 1, "description": "The policy's max_file_size_mb when rclone ran with it: files larger than this many MiB were excluded by rclone and are not counted. Added in 0.1.2." },
             "files_total": { "type": "integer", "minimum": 0 },
             "files_transferred": { "type": "integer", "minimum": 0 },
             "bytes_transferred": { "type": "integer", "minimum": 0 },

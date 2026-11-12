@@ -37,6 +37,33 @@ field.
 `cancel` and `status` require `target_job_id`. `filters` become rclone
 `--include` patterns (validated); they are never passed through raw.
 
+`job_id` and `target_job_id` become topic levels, so both must be 1 to 128
+characters from `A-Z a-z 0-9 . _ -`. A command with a `job_id` outside that
+set, or without one, is logged and dropped: there is no topic to answer it
+on. An invalid `target_job_id` is a `schema_violation` on the command's own
+topic. A command payload larger than 65536 bytes is rejected.
+
+The worker handles commands one at a time in the order they arrive. Its MQTT
+callback only queues them, so a slow or unreachable broker never blocks the
+client's own processing; at most 256 commands wait in the queue, and a
+command that finds the queue full is dropped and logged as an error.
+
+### Status queries
+
+`{"job_id":"q-1","action":"status","target_job_id":"job-001"}` is answered on
+`…/jobs/q-1/status` (the query's own topic, never the queried job's):
+
+```json
+{ "event_type": "status", "job_id": "q-1", "status": "completed",
+  "detail": "job job-001: failed", "target_job_id": "job-001",
+  "target_status": "failed", "worker_id": "worker-01", "timestamp": "…" }
+```
+
+`target_status` is the queried job's last known status in this worker
+process: `accepted`, `started`, `completed`, `failed`, `cancelled`,
+`rejected`, or `unknown` for a `job_id` the process has not handled. It is
+lost on restart.
+
 ## Job lifecycle
 
 ```
@@ -49,6 +76,8 @@ received ──(schema fail)──► rejected
 
 Every transition is a `status` event; the terminal state is also a `result`
 event. Result `status` is one of `completed | failed | cancelled | rejected`.
+The terminal `status` event may carry a `detail` that qualifies it: a dry
+run, a size limit that applied, or a result that could not be sealed.
 
 ## Events
 
@@ -56,7 +85,7 @@ event. Result `status` is one of `completed | failed | cancelled | rejected`.
 - **progress** — adds `files_total, files_transferred, bytes_total, bytes_transferred, percent`
 - **result** — a **sealed evidence record** (see below and [`EVIDENCE_MODEL.md`](EVIDENCE_MODEL.md))
 - **log** — `level, message`
-- **health** (retained) — `status, uptime_seconds, active_jobs, max_parallel_jobs, rclone_available, policy_version, policy_hash, supported_actions`
+- **health** (retained) — `status, detail?, uptime_seconds, active_jobs, max_parallel_jobs, rclone_available, policy_version, policy_hash, supported_actions`. `status` is `healthy`; `unhealthy` with a `detail` once the evidence journal could not be written (the worker then refuses every job until it is restarted); `stopped` on a clean shutdown; `offline` as the Last Will.
 - **capabilities** (retained) — `supported_actions, max_parallel_jobs, rclone_available, evidence_schema, evidence_journal, evidence_signed, policy_version, policy_hash`
 
 ### Result record
@@ -75,8 +104,11 @@ into the worker's hash chain:
 `event_type` is `transfer.job.result` for completed, failed and cancelled jobs
 and `transfer.job.rejected` for jobs refused by schema or policy. The `payload`
 carries the audit fields `command_hash`, `policy_version`, `policy_hash`,
-`worker_version`, `rclone_exit_code`, `status`, counters and (for rejections)
-`reason`/`detail`; its own `event_type` stays `result`. The record adds
+`worker_version`, `rclone_exit_code`, `status`, counters, for a job that ran
+`dry_run` and, under a size limit, `max_file_size_mb`, and (for rejections)
+`reason`/`detail`; its own `event_type` stays `result`. A result is published
+only as a sealed record: if it cannot be written to the journal, nothing is
+published on the result topic and the terminal status says so. The record adds
 `content_hash` = `SHA-256(JCS(payload))` and `chain_hash` linking to
 `prev_hash`. Machine-readable contracts:
 [`../schemas/command.schema.json`](../schemas/command.schema.json),
@@ -89,4 +121,6 @@ carries the audit fields `command_hash`, `policy_version`, `policy_hash`,
 
 `schema_violation` (bad/closed-schema command) · `policy_violation` (action/
 source/target/guard) · `duplicate_job_id` · `too_many_jobs` (`max_parallel_jobs`).
-Every rejection is itself a sealed result record.
+Every rejection is itself a sealed result record. After a journal write
+failure, commands are refused with a `rejected` status event only, because no
+record can be sealed.

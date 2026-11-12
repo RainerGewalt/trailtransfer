@@ -25,6 +25,20 @@ wrapper around it.
 > Works with any MQTT broker. No TrailMQ, database or cloud service is
 > required.
 
+**Status: evaluation (0.1.x).** TrailTransfer has been tested by its author
+on the paths described here, not yet by outside users, and makes no claim of
+production readiness. What a journal shows today, level by level:
+
+- **The job was handled as recorded:** yes, for each job the worker
+  finishes while it runs. The record holds the command hash, the policy, the
+  decision, whether it was a dry run, the rclone exit code and rclone's
+  counters.
+- **It survived a crash or restart:** not yet. A job running when the worker
+  stops leaves no record, and the duplicate check starts empty after a
+  restart ([#1](https://github.com/RainerGewalt/trailtransfer/issues/1)).
+- **The file bytes arrived intact:** not shown. The journal holds no per-file
+  manifest ([#2](https://github.com/RainerGewalt/trailtransfer/issues/2)).
+
 ```
 MQTT command in
   → policy validation
@@ -33,17 +47,18 @@ MQTT command in
   → sealed, hash-chained evidence record  →  trailtransfer verify
 ```
 
-Every finished job, completed **or** rejected, is sealed into a hash-chained,
-append-only journal that `trailtransfer verify` or the independent
-[trail-evidence](https://github.com/RainerGewalt/trail-evidence) verifiers
-check without a database, a cloud service or the broker. The chain shows
-records that were edited, removed or reordered within the journal; records cut
-off at its end need an external anchor. With a signing key,
-`verify --pubkey` requires a valid signature on every record.
-What the journal does not prove is in
-[`docs/EVIDENCE_MODEL.md`](docs/EVIDENCE_MODEL.md); how it relates to
-data-integrity requirements, and what the operator has to provide, is in
-[`docs/COMPLIANCE.md`](docs/COMPLIANCE.md).
+Every job the worker finishes, completed, failed **or** rejected, is sealed
+into a hash-chained, append-only journal that `trailtransfer verify` or the
+independent [trail-evidence](https://github.com/RainerGewalt/trail-evidence)
+verifiers check without a database, a cloud service or the broker. The chain
+shows records that were edited, removed or reordered within the journal;
+records cut off at its end need an external anchor. With a signing key,
+`verify --pubkey` requires a valid signature on every record. A command
+without a valid `job_id` has no topic to answer on and is logged and dropped.
+If the journal cannot be written, the worker publishes nothing unsealed,
+reports `unhealthy` and refuses new jobs until it is restarted. What the
+journal does not prove, and what the operator has to provide, is in
+[`docs/EVIDENCE_MODEL.md`](docs/EVIDENCE_MODEL.md).
 
 ![Two terminal transcripts. Terminal 1 runs mosquitto_sub on the job status topics and shows job-001 going from accepted to started to completed. Terminal 2 sends examples/commands/copy.json with mosquitto_pub; jq shows the journal record with seq 0, event_type transfer.job.result, status completed, 3 files, 11887 bytes and rclone exit code 0; docker compose exec s3 ls lists sample-01.png, sample-02.png and sample-03.jpg in the demo bucket; ./trailtransfer verify prints OK for 1 record.](docs/images/copy-job-transcript.png)
 
@@ -71,10 +86,13 @@ manager · an enterprise MFT suite · a cloud service.
   TrailTransfer exposes **no inbound port** and **no shell**; it holds a single
   outbound MQTT connection and only ever runs a fixed, allowlisted rclone action
   built as an argument vector — never a shell string.
-- **What you can prove:** for every job — which action, with which policy
-  (`policy_hash`), from where to where, its rclone exit code and counters,
-  chained to the previous record. Per-file content manifests and trusted
-  timestamps remain future assurance work; see
+- **What the journal shows:** for every job the worker finished, which
+  action, with which policy (`policy_hash`), from where to where (in the
+  normalised form the policy checked), whether it was a dry run, under which
+  size limit, its rclone exit code and rclone's counters, chained to the
+  previous record. Files above `max_file_size_mb` are skipped by rclone and
+  not counted; the record names the limit. Per-file content manifests and
+  trusted timestamps remain future work; see
   [the evidence model](docs/EVIDENCE_MODEL.md) for the current boundary.
 
 ## Install
@@ -168,7 +186,7 @@ a full sample. Each record is chained to the previous one:
   "policy": { "id": "worker-policy.yaml", "version": "1", "hash": "sha256:…", "kind": "transfer-policy" },
   "payload": {
     "action": "copy", "source": "/data/input", "target": "s3-demo:trailtransfer",
-    "status": "completed", "files_transferred": 10, "bytes_transferred": 12345678,
+    "status": "completed", "dry_run": false, "files_transferred": 10, "bytes_transferred": 12345678,
     "rclone_exit_code": 0, "policy_version": "1", "policy_hash": "sha256:…",
     "worker_version": "0.1.0", "command_hash": "sha256:…"
   },
@@ -186,7 +204,10 @@ restarts are visible without being chain breaks.
 
 Verify a whole journal independently: `trailtransfer verify /data/evidence/journal.jsonl`.
 It reports `hash_mismatch`, `chain_break`, `seq_gap`, `schema_invalid`,
-`signature_invalid` and (informational) `restart` findings per record.
+`signature_invalid` and (informational) `restart` findings per record, and
+after the verdict what it did not check: signatures without `--pubkey`,
+records cut off after the last one, the transferred files themselves. A
+journal without records is reported as `EMPTY` with exit code 1.
 
 ## Worker policy — the security boundary
 
@@ -200,15 +221,24 @@ policy_version: "1"
 allowed_actions: [copy, move, sync, check]
 allowed_sources: [/data/input, /data/reports]
 allowed_targets: [sftp-demo:/upload, s3-demo:trailtransfer]
-max_file_size_mb: 500
+max_file_size_mb: 500           # larger files are skipped by rclone, not counted
 max_parallel_jobs: 2
-allow_delete: false
+allow_delete: false             # move is allowlisted but still gated by this
 allow_sync_delete: false        # sync is allowlisted but still gated by this
 allow_absolute_targets: false
 allow_broadcast_commands: false
 dry_run_default: true
 require_job_id: true
 ```
+
+Sources and targets are normalised before the comparison (repeated `/`, `.`
+segments and a trailing `/` removed) and must equal or sit beneath an
+allowlisted entry; parent segments in any spelling, encoded separators and
+rclone connection strings are refused, and local symbolic links are resolved.
+`move` deletes the source and needs `allow_delete: true`; `sync` can delete
+on the target and needs `allow_sync_delete: true`. An unknown or misspelt key
+makes the policy invalid: `trailtransfer validate-config` fails and the worker
+does not start.
 
 Remote **aliases** (`sftp-demo:`) resolve to `rclone.conf`, which the operator
 provides and mounts read-only. TrailTransfer never generates it and never logs
@@ -233,8 +263,12 @@ passes the journal but fails an edited copy.*
 | `trailtransfer/{w}/health` | out | 1 | ✓ (+ LWT `offline`) |
 | `trailtransfer/{w}/capabilities` | out | 1 | ✓ |
 
-Job lifecycle: `received → rejected` (schema/policy) **or**
+A `job_id` becomes a topic level, so it must be 1 to 128 characters from
+`A-Z a-z 0-9 . _ -`; a command with any other `job_id` is logged and
+dropped. Job lifecycle: `received → rejected` (schema/policy) **or**
 `received → accepted → started → progress* → completed | failed | cancelled`.
+A `status` command answers on its own topic with the queried job's last
+known status. See [`docs/MQTT_CONTRACT.md`](docs/MQTT_CONTRACT.md).
 
 ## CLI
 
@@ -242,7 +276,7 @@ Job lifecycle: `received → rejected` (schema/policy) **or**
 trailtransfer run [--config config.yaml]     # start the worker
 trailtransfer validate-config [--config …]   # load config+policy, exit 0/1
 trailtransfer print-capabilities [--config …]# print the capabilities JSON
-trailtransfer verify [--pubkey key.pub] <journal>  # verify the evidence chain; with a key, every record must be validly signed
+trailtransfer verify [--pubkey key.pub] <journal>  # verify the evidence chain and say what was not checked; with a key, every record must be validly signed
 trailtransfer keygen [--out name]            # generate an Ed25519 signing key pair
 trailtransfer version
 ```
@@ -255,12 +289,21 @@ A YAML config is optional; `TRAILTRANSFER_*` env vars override it (see
 
 ## Security model
 
-MQTT commands are untrusted; the local policy is authoritative. No shell
-execution, no arbitrary rclone flags, no secrets in logs, no unrestricted
-paths/remotes. Duplicate `job_id`s are deduplicated; `max_parallel_jobs` bounds
-concurrency; a JCS hash chain (`content_hash`/`chain_hash`) links every outcome
-to the one before it. See
-[`SECURITY.md`](SECURITY.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+MQTT commands are untrusted; the local policy is authoritative, and whoever
+may publish to the command topic is decided by the broker's authentication
+and ACLs. No shell execution, no arbitrary rclone flags, no source or target
+outside the allowlist in any spelling. rclone error lines pass a pattern
+filter for credentials, which is not a guarantee for every format. A repeated
+`job_id` is refused while the worker runs; after a restart the same command
+runs again ([#1](https://github.com/RainerGewalt/trailtransfer/issues/1)).
+The policy's `max_parallel_jobs` bounds concurrency; a JCS hash chain
+(`content_hash`/`chain_hash`) links every outcome to the one before it.
+
+The worker connects to the broker over plain TCP; there is no TLS support in
+0.1.x. Run the broker on the same host or a trusted network segment, or reach
+it through a tunnel. [`SECURITY.md`](SECURITY.md) lists every threat with the
+test that shows the protection, and the known limits;
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) describes the components.
 
 ## Using it with TrailMQ
 
@@ -278,7 +321,8 @@ not read or verify the TrailTransfer journal; that stays with
 ```bash
 go build ./cmd/trailtransfer
 go test ./...
-make first-use   # README and Quickstart from a fresh clone, see docs/TESTING.md
+make negative-paths   # edge cases on a local Mosquitto and rclone, no Docker
+make first-use        # README and Quickstart from a fresh clone, see docs/TESTING.md
 ```
 
 ## Roadmap
@@ -299,7 +343,7 @@ make first-use   # README and Quickstart from a fresh clone, see docs/TESTING.md
   public end-to-end demo between simulated systems with verification (#3);
   format 0.2 of trail-evidence (#4).
 - **later** — RFC 3161 timestamps, WORM export, retries.
-- **v1.0** — stable schemas, hardened image, full CI, deployment/validation guide.
+- **v1.0** — stable schemas, hardened image, full CI, deployment guide.
 
 ## Contributing
 

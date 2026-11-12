@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,22 +33,39 @@ type Manager struct {
 	runner Runner
 	log    *slog.Logger
 
-	mu      sync.Mutex
-	active  map[string]context.CancelFunc
-	seen    map[string]struct{}
+	mu     sync.Mutex
+	active map[string]context.CancelFunc
+	seen   map[string]struct{}
+	// outcome is the last known status of every job_id this process has
+	// handled: accepted, started, then completed, failed or cancelled; or
+	// rejected. It answers status queries and, like seen, lives only as long
+	// as the process.
+	outcome map[string]string
 	running int
+
+	// queue decouples the MQTT message callback from command handling, see
+	// Handle.
+	queue chan []byte
 }
 
-// NewManager wires the manager to its policy, publisher and runner.
+// commandQueueSize bounds the commands waiting to be handled.
+const commandQueueSize = 256
+
+// NewManager wires the manager to its policy, publisher and runner and starts
+// the goroutine that handles queued commands in arrival order.
 func NewManager(pol *policy.Policy, pub *events.Publisher, runner Runner, log *slog.Logger) *Manager {
-	return &Manager{
-		pol:    pol,
-		pub:    pub,
-		runner: runner,
-		log:    log,
-		active: map[string]context.CancelFunc{},
-		seen:   map[string]struct{}{},
+	m := &Manager{
+		pol:     pol,
+		pub:     pub,
+		runner:  runner,
+		log:     log,
+		active:  map[string]context.CancelFunc{},
+		seen:    map[string]struct{}{},
+		outcome: map[string]string{},
+		queue:   make(chan []byte, commandQueueSize),
 	}
+	go m.dispatch()
+	return m
 }
 
 // ActiveCount reports the number of currently running jobs.
@@ -60,8 +78,37 @@ func (m *Manager) ActiveCount() int {
 // SupportedActions is advertised in health/capabilities.
 func (m *Manager) SupportedActions() []string { return m.pol.SupportedActions() }
 
-// Handle processes one raw command payload from the command topic.
+// Health reports "healthy", or "unhealthy" once the evidence journal could
+// not be written: from then on the worker refuses every job.
+func (m *Manager) Health() (status, detail string) {
+	if err := m.pub.EvidenceErr(); err != nil {
+		return "unhealthy", "evidence journal write failed, no jobs are accepted until the worker is restarted: " + err.Error()
+	}
+	return "healthy", ""
+}
+
+// Handle accepts one raw command payload from the command topic and queues it
+// for handling. It never blocks. The MQTT client calls it from its message
+// callback, and a callback that waits for a publish can keep the client from
+// processing acknowledgements and from reconnecting. Commands are handled one
+// at a time in arrival order; when the queue is full, the command is dropped
+// and logged as an error.
 func (m *Manager) Handle(payload []byte) {
+	select {
+	case m.queue <- append([]byte(nil), payload...):
+	default:
+		m.log.Error("command queue full, command dropped", "job_id", commands.PeekJobID(payload), "queue_size", commandQueueSize)
+	}
+}
+
+func (m *Manager) dispatch() {
+	for payload := range m.queue {
+		m.handle(payload)
+	}
+}
+
+// handle processes one command payload.
+func (m *Manager) handle(payload []byte) {
 	cmd, err := commands.Decode(payload)
 	if err != nil {
 		m.handleSchemaError(payload, err)
@@ -78,11 +125,23 @@ func (m *Manager) Handle(payload []byte) {
 		return
 	}
 
-	if dec := m.pol.Evaluate(cmd); !dec.Allowed {
+	// Without a working journal no outcome can be sealed, so nothing runs.
+	if err := m.pub.EvidenceErr(); err != nil {
+		m.log.Error("command refused: evidence journal unavailable", "job_id", cmd.JobID, "error", err)
+		m.pub.Status(cmd.JobID, "rejected", "evidence journal unavailable, the worker accepts no jobs until it is restarted")
+		return
+	}
+
+	dec := m.pol.Evaluate(cmd)
+	if !dec.Allowed {
 		m.log.Warn("command rejected by policy", "job_id", cmd.JobID, "reason", dec.Reason, "detail", dec.Detail)
 		m.reject(cmd.JobID, dec.Reason, dec.Detail, cmdHash, actorFor(cmd))
 		return
 	}
+	// Run exactly what the policy checked: the normalised source and target.
+	// command_hash stays the hash of the command as received.
+	run := *cmd
+	run.Source, run.Target = dec.Source, dec.Target
 
 	m.mu.Lock()
 	if _, dup := m.seen[cmd.JobID]; dup {
@@ -96,35 +155,36 @@ func (m *Manager) Handle(payload []byte) {
 		return
 	}
 	m.seen[cmd.JobID] = struct{}{}
+	m.outcome[cmd.JobID] = "accepted"
 	m.running++
 	m.mu.Unlock()
 
-	go m.run(cmd, cmdHash)
+	go m.run(&run, cmdHash)
 }
 
 func (m *Manager) handleSchemaError(payload []byte, err error) {
 	jobID := commands.PeekJobID(payload)
 	if jobID == "" {
-		m.log.Warn("dropping invalid command with no job_id", "error", err)
+		m.log.Warn("dropping invalid command without a usable job_id", "error", err)
 		return
 	}
 	cmdHash, _ := evidence.HashBytes(payload)
 	m.log.Warn("command rejected: schema violation", "job_id", jobID, "error", err)
-	m.pub.Status(jobID, "rejected", err.Error())
-	m.pub.Result(events.ResultEvent{
-		JobID:         jobID,
-		Status:        "rejected",
-		Reason:        "schema_violation",
-		Detail:        err.Error(),
-		PolicyVersion: m.pol.PolicyVersion,
-		PolicyHash:    m.pol.Hash,
-		CommandHash:   cmdHash,
-	}, nil)
+	m.reject(jobID, "schema_violation", err.Error(), cmdHash, nil)
 }
 
+// reject seals and publishes a rejection, then its status. A duplicate
+// job_id does not replace the outcome of the job that ran under it.
 func (m *Manager) reject(jobID, reason, detail, cmdHash string, actor *evidence.Actor) {
-	m.pub.Status(jobID, "rejected", detail)
-	m.pub.Result(events.ResultEvent{
+	if reason != "duplicate_job_id" {
+		m.mu.Lock()
+		if _, known := m.outcome[jobID]; !known {
+			m.outcome[jobID] = "rejected"
+		}
+		m.mu.Unlock()
+	}
+	statusDetail := detail
+	if err := m.pub.Result(events.ResultEvent{
 		JobID:         jobID,
 		Status:        "rejected",
 		Reason:        reason,
@@ -132,7 +192,19 @@ func (m *Manager) reject(jobID, reason, detail, cmdHash string, actor *evidence.
 		PolicyVersion: m.pol.PolicyVersion,
 		PolicyHash:    m.pol.Hash,
 		CommandHash:   cmdHash,
-	}, actor)
+	}, actor); err != nil {
+		m.sealFailed(jobID, err)
+		statusDetail += "; " + notSealed
+	}
+	m.pub.Status(jobID, "rejected", statusDetail)
+}
+
+const notSealed = "the outcome was not sealed and not published: evidence journal write failed"
+
+// sealFailed logs a result that could not be sealed. The sealer refuses
+// every later record, health turns unhealthy and new jobs are refused.
+func (m *Manager) sealFailed(jobID string, err error) {
+	m.log.Error("evidence journal write failed: result not sealed and not published; the worker accepts no jobs until it is restarted", "job_id", jobID, "error", err)
 }
 
 // actorFor derives the evidence actor from a command's self-declared operator.
@@ -157,6 +229,9 @@ func (m *Manager) run(c *commands.Command, cmdHash string) {
 	}()
 
 	m.pub.Status(c.JobID, "accepted", "")
+	m.mu.Lock()
+	m.outcome[c.JobID] = "started"
+	m.mu.Unlock()
 	m.pub.Status(c.JobID, "started", "")
 
 	dryRun := m.pol.DryRunDefault
@@ -199,6 +274,7 @@ func (m *Manager) run(c *commands.Command, cmdHash string) {
 		StartedAt:        started.UTC().Format(time.RFC3339),
 		FinishedAt:       finished.UTC().Format(time.RFC3339),
 		DurationMS:       finished.Sub(started).Milliseconds(),
+		DryRun:           &dryRun,
 		FilesTotal:       out.FilesTotal,
 		FilesTransferred: out.FilesTransferred,
 		BytesTransferred: out.BytesTransferred,
@@ -206,6 +282,17 @@ func (m *Manager) run(c *commands.Command, cmdHash string) {
 		PolicyVersion:    m.pol.PolicyVersion,
 		PolicyHash:       m.pol.Hash,
 		CommandHash:      cmdHash,
+	}
+	var notes []string
+	if dryRun {
+		// rclone counts what it would have transferred; nothing was.
+		res.FilesTotal = max(out.FilesTotal, out.FilesTransferred)
+		res.FilesTransferred, res.BytesTransferred = 0, 0
+		notes = append(notes, "dry run, nothing was transferred")
+	}
+	if m.pol.MaxFileSizeMB > 0 {
+		res.MaxFileSizeMB = m.pol.MaxFileSizeMB
+		notes = append(notes, fmt.Sprintf("files larger than %d MiB are excluded by max_file_size_mb and not counted", m.pol.MaxFileSizeMB))
 	}
 	// The exit code is evidence only if rclone ran: a clean exit, or an exit
 	// with a code. When it could not start (binary missing, bad arguments),
@@ -218,8 +305,14 @@ func (m *Manager) run(c *commands.Command, cmdHash string) {
 	if runErr != nil && len(res.Errors) == 0 {
 		res.Errors = []string{logging.Redact(runErr.Error())}
 	}
-	m.pub.Result(res, actorFor(c))
-	m.pub.Status(c.JobID, status, "")
+	m.mu.Lock()
+	m.outcome[c.JobID] = status
+	m.mu.Unlock()
+	if err := m.pub.Result(res, actorFor(c)); err != nil {
+		m.sealFailed(c.JobID, err)
+		notes = append(notes, notSealed)
+	}
+	m.pub.Status(c.JobID, status, strings.Join(notes, "; "))
 }
 
 func (m *Manager) handleCancel(c *commands.Command) {
@@ -235,18 +328,14 @@ func (m *Manager) handleCancel(c *commands.Command) {
 	m.pub.Status(c.JobID, "completed", "cancel signal sent to "+c.TargetJobID)
 }
 
+// handleStatus answers on the query's own topic with the target job's last
+// known status; it never publishes on the target job's topics.
 func (m *Manager) handleStatus(c *commands.Command) {
 	m.mu.Lock()
-	_, active := m.active[c.TargetJobID]
-	_, seen := m.seen[c.TargetJobID]
+	st, known := m.outcome[c.TargetJobID]
 	m.mu.Unlock()
-	switch {
-	case active:
-		m.pub.Status(c.TargetJobID, "started", "job is running")
-	case seen:
-		m.pub.Status(c.TargetJobID, "completed", "job already finished")
-	default:
-		m.pub.Status(c.TargetJobID, "unknown", "no such job")
+	if !known {
+		st = "unknown"
 	}
-	m.pub.Status(c.JobID, "completed", "status reported for "+c.TargetJobID)
+	m.pub.StatusAnswer(c.JobID, c.TargetJobID, st)
 }

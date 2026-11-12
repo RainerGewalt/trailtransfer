@@ -1,19 +1,23 @@
 # TrailTransfer worker policy — the security boundary.
 # MQTT commands are untrusted input; this file is authoritative. Keep it in
 # version control and bump policy_version on every change. Its SHA-256
-# (policy_hash) is stamped into every result event for audit.
+# (policy_hash) is stamped into every result event. The file is read
+# strictly: an unknown or misspelt key makes it invalid (docs/POLICY.md).
 worker_id: worker-01
 policy_version: "1"
 
 # Only these actions are executable. Anything else is rejected. Note: sync is
-# additionally gated by allow_sync_delete below (it can delete on the target).
+# additionally gated by allow_sync_delete (it can delete on the target) and
+# move by allow_delete (it deletes the source), both below.
 allowed_actions:
   - copy
   - move
   - sync
   - check
 
-# Reads are only permitted from these roots (prefix match, no '..').
+# Reads are only permitted from these roots. Sources are normalised and must
+# equal or sit beneath a root; parent segments are refused and symbolic links
+# are resolved (docs/POLICY.md, "Path rules").
 allowed_sources:
   - /data/input
   - /data/reports
@@ -24,10 +28,10 @@ allowed_targets:
   - sftp-demo:/upload
   - s3-demo:trailtransfer
 
-max_file_size_mb: 500
+max_file_size_mb: 500            # MiB; larger files are skipped, not counted
 max_parallel_jobs: 2
 
-allow_delete: false              # delete/purge actions
+allow_delete: false              # let move delete the source after the transfer
 allow_sync_delete: false         # let sync delete on the target side
 allow_absolute_targets: false    # absolute local target paths
 allow_broadcast_commands: false  # trailtransfer/all/commands — off by design

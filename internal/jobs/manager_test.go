@@ -3,9 +3,11 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -72,16 +74,19 @@ func (f fakeRunner) Run(_ context.Context, _ *commands.Command, _ bool, onProgre
 	return f.out, f.err
 }
 
-// recordingRunner captures the dryRun flag it was invoked with.
+// recordingRunner captures the command and dryRun flag it was invoked with.
 type recordingRunner struct {
 	called bool
 	dryRun bool
+	cmd    commands.Command
+	out    rclone.Outcome
 }
 
-func (r *recordingRunner) Run(_ context.Context, _ *commands.Command, dryRun bool, _ func(rclone.Progress)) (rclone.Outcome, error) {
+func (r *recordingRunner) Run(_ context.Context, c *commands.Command, dryRun bool, _ func(rclone.Progress)) (rclone.Outcome, error) {
 	r.called = true
 	r.dryRun = dryRun
-	return rclone.Outcome{}, nil
+	r.cmd = *c
+	return r.out, nil
 }
 
 func newTestManager(runner Runner) (*Manager, *recorder) {
@@ -243,4 +248,251 @@ func TestRejectionIsSealedAsRejectedEvent(t *testing.T) {
 	if env["job_id"] != "job-010" {
 		t.Fatalf("job_id missing on record: %v", env)
 	}
+}
+
+// blockingMQTT never completes a publish, like a client whose broker
+// connection is gone and whose reconnect waits for the message callback.
+type blockingMQTT struct{ release chan struct{} }
+
+func (b *blockingMQTT) Publish(string, byte, bool, []byte) error {
+	<-b.release
+	return nil
+}
+
+func newManagerWith(mq events.MQTT, runner Runner) *Manager {
+	cfg := &config.Config{WorkerID: "worker-01", TopicPrefix: "trailtransfer"}
+	pol := &policy.Policy{
+		PolicyVersion:   "1",
+		AllowedActions:  []string{"copy"},
+		AllowedSources:  []string{"/data/input"},
+		AllowedTargets:  []string{"s3-demo:trailtransfer"},
+		MaxParallelJobs: 2,
+		RequireJobID:    true,
+		DryRunDefault:   true,
+	}
+	sealer, _ := evidence.NewSealer(evidence.Options{ProducerID: cfg.WorkerID, ProducerVersion: "test"})
+	pub := events.NewPublisher(mq, cfg, "test", sealer)
+	return NewManager(pol, pub, runner, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+// Handle is called from the MQTT client's message callback. Paho must not be
+// blocked there: a callback that waits for a publish kept the client from
+// reconnecting, and one command took the worker off the broker (audit E1).
+func TestHandleNeverWaitsForAPublish(t *testing.T) {
+	mq := &blockingMQTT{release: make(chan struct{})}
+	defer close(mq.release)
+	m := newManagerWith(mq, fakeRunner{})
+	done := make(chan struct{})
+	go func() {
+		m.Handle([]byte(`{"job_id":"job-1","action":"copy","source":"/etc","target":"s3-demo:trailtransfer"}`))
+		m.Handle([]byte(`{"job_id":"job-2","action":"exec"}`))
+		m.Handle([]byte(`{"job_id":"job-3","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer"}`))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Handle waited for a publish; the MQTT message callback must never block on one")
+	}
+}
+
+var safeTopic = regexp.MustCompile(`^trailtransfer/worker-01/jobs/[A-Za-z0-9._-]{1,128}/(status|progress|result|logs)$`)
+
+// A command whose job_id or target_job_id is not a safe topic level is
+// dropped and logged, never answered on a topic built from it.
+func TestInvalidJobIDsArePublishedNowhere(t *testing.T) {
+	m, rec := newTestManager(fakeRunner{out: rclone.Outcome{FilesTotal: 1, FilesTransferred: 1}})
+	for _, p := range []string{
+		`{"job_id":"bad#id","action":"copy","source":"/etc","target":"s3-demo:trailtransfer"}`,
+		`{"job_id":"run#id","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer"}`,
+		`{"job_id":"bad+id","action":"copy","source":"/etc","target":"s3-demo:trailtransfer"}`,
+		`{"job_id":"a/b","action":"copy","source":"/etc","target":"s3-demo:trailtransfer"}`,
+		`{"job_id":"bad#schema","action":"exec"}`,
+		`{"job_id":"q-1","action":"status","target_job_id":"x#y"}`,
+		`{"job_id":"q-2","action":"cancel","target_job_id":"x/y"}`,
+	} {
+		m.Handle([]byte(p))
+	}
+	// Commands are handled in order, so once this result is there every
+	// command above has been handled.
+	m.Handle([]byte(`{"job_id":"job-after","action":"copy","source":"/etc","target":"s3-demo:trailtransfer"}`))
+	rec.waitResult(t, "job-after")
+
+	m.mu.Lock()
+	_, admitted := m.seen["run#id"]
+	m.mu.Unlock()
+	if admitted {
+		t.Error("a command with job_id run#id was admitted for execution")
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	for _, msg := range rec.msgs {
+		if !safeTopic.MatchString(msg.topic) {
+			t.Errorf("published on a topic built from an invalid id: %q", msg.topic)
+		}
+	}
+}
+
+// rclone receives, and the record names, the source and target the policy
+// checked, not another spelling of them.
+func TestRunUsesTheNormalisedSourceAndTarget(t *testing.T) {
+	rr := &recordingRunner{}
+	m, rec := newTestManager(rr)
+	m.Handle([]byte(`{"job_id":"job-n","action":"copy","source":"/data/input//sub/./","target":"s3-demo:trailtransfer//x/./","dry_run":false}`))
+	p := payloadOf(t, rec.waitResult(t, "job-n"))
+	if rr.cmd.Source != "/data/input/sub" || rr.cmd.Target != "s3-demo:trailtransfer/x" {
+		t.Fatalf("rclone got %q -> %q, want /data/input/sub -> s3-demo:trailtransfer/x", rr.cmd.Source, rr.cmd.Target)
+	}
+	if p["source"] != "/data/input/sub" || p["target"] != "s3-demo:trailtransfer/x" {
+		t.Fatalf("record names %v -> %v, want the normalised form", p["source"], p["target"])
+	}
+}
+
+// newTestManagerWith is newTestManager with a policy adjustment.
+func newTestManagerWith(runner Runner, adjust func(*policy.Policy)) (*Manager, *recorder) {
+	m, rec := newTestManager(runner)
+	adjust(m.pol)
+	return m, rec
+}
+
+// messages returns the payloads published on one job topic, in order.
+func (r *recorder) messages(jobID, suffix string) []map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []map[string]any
+	for _, m := range r.msgs {
+		if strings.HasSuffix(m.topic, "jobs/"+jobID+"/"+suffix) {
+			var v map[string]any
+			_ = json.Unmarshal(m.payload, &v)
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// waitStatus waits until the job's status topic carries the given status.
+func (r *recorder) waitStatus(t *testing.T, jobID, status string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, s := range r.messages(jobID, "status") {
+			if s["status"] == status {
+				return s
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("no status %q for %s; got %v", status, jobID, r.messages(jobID, "status"))
+	return nil
+}
+
+// A dry run used to be recorded like a transfer, with the counters rclone
+// reports for what it would have done (audit E2).
+func TestDryRunIsRecordedAsADryRun(t *testing.T) {
+	rr := &recordingRunner{out: rclone.Outcome{FilesTotal: 1, FilesTransferred: 1, BytesTotal: 6, BytesTransferred: 6}}
+	m, rec := newTestManager(rr) // dry_run_default: true
+	m.Handle([]byte(`{"job_id":"job-dry","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer"}`))
+	p := payloadOf(t, rec.waitResult(t, "job-dry"))
+	if p["dry_run"] != true {
+		t.Fatalf("record must say dry_run true, got %v", p["dry_run"])
+	}
+	if p["files_transferred"].(float64) != 0 || p["bytes_transferred"].(float64) != 0 {
+		t.Fatalf("a dry run transfers nothing; record says files %v, bytes %v", p["files_transferred"], p["bytes_transferred"])
+	}
+	if p["files_total"].(float64) != 1 {
+		t.Fatalf("files_total must keep what rclone would have transferred, got %v", p["files_total"])
+	}
+	if s := rec.waitStatus(t, "job-dry", "completed"); !strings.Contains(fmt.Sprint(s["detail"]), "dry run") {
+		t.Fatalf("the completed status must say it was a dry run, got %v", s)
+	}
+}
+
+func TestRealRunIsRecordedAsNoDryRun(t *testing.T) {
+	rr := &recordingRunner{out: rclone.Outcome{FilesTotal: 1, FilesTransferred: 1, BytesTotal: 6, BytesTransferred: 6}}
+	m, rec := newTestManager(rr)
+	m.Handle([]byte(`{"job_id":"job-real","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer","dry_run":false}`))
+	p := payloadOf(t, rec.waitResult(t, "job-real"))
+	if p["dry_run"] != false || p["files_transferred"].(float64) != 1 || p["bytes_transferred"].(float64) != 6 {
+		t.Fatalf("a real run must say dry_run false and keep its counters, got %+v", p)
+	}
+}
+
+// Files over max_file_size_mb are excluded by rclone without an error; the
+// record used to say completed with nothing that pointed at the limit (E7).
+func TestSizeLimitIsNamedInTheRecord(t *testing.T) {
+	m, rec := newTestManagerWith(fakeRunner{}, func(p *policy.Policy) { p.MaxFileSizeMB = 1 })
+	m.Handle([]byte(`{"job_id":"job-big","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer","dry_run":false}`))
+	p := payloadOf(t, rec.waitResult(t, "job-big"))
+	if p["max_file_size_mb"] != float64(1) {
+		t.Fatalf("record must name max_file_size_mb 1, got %v", p["max_file_size_mb"])
+	}
+	if s := rec.waitStatus(t, "job-big", "completed"); !strings.Contains(fmt.Sprint(s["detail"]), "max_file_size_mb") {
+		t.Fatalf("the completed status must mention the size limit, got %v", s)
+	}
+
+	m, rec = newTestManager(fakeRunner{})
+	m.Handle([]byte(`{"job_id":"job-nolimit","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer","dry_run":false}`))
+	if p := payloadOf(t, rec.waitResult(t, "job-nolimit")); p["max_file_size_mb"] != nil {
+		t.Fatalf("without a limit the record must not name one, got %v", p["max_file_size_mb"])
+	}
+}
+
+// A status query reported "completed" for a failed job and published on the
+// queried job's topic (audit E8).
+func TestStatusQueryReportsTheStoredOutcomeOnItsOwnTopic(t *testing.T) {
+	m, rec := newTestManager(fakeRunner{out: rclone.Outcome{ExitCode: 1, Errors: []string{"boom"}}})
+	m.Handle([]byte(`{"job_id":"job-f","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer","dry_run":false}`))
+	rec.waitStatus(t, "job-f", "failed")
+	m.Handle([]byte(`{"job_id":"job-r","action":"copy","source":"/etc","target":"s3-demo:trailtransfer"}`))
+	rec.waitStatus(t, "job-r", "rejected")
+	// A repeated job_id is refused as a duplicate; that must not replace the
+	// outcome of the job that ran.
+	m.Handle([]byte(`{"job_id":"job-f","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer","dry_run":false}`))
+	before := len(rec.messages("job-f", "status"))
+
+	for q, want := range map[string]struct{ target, status string }{
+		"q-1": {"job-f", "failed"},
+		"q-2": {"job-r", "rejected"},
+		"q-3": {"never-seen", "unknown"},
+	} {
+		m.Handle([]byte(`{"job_id":"` + q + `","action":"status","target_job_id":"` + want.target + `"}`))
+		s := rec.waitStatus(t, q, "completed")
+		if s["target_job_id"] != want.target || s["target_status"] != want.status {
+			t.Errorf("status query %s for %s: want target_status %q, got %v", q, want.target, want.status, s)
+		}
+	}
+	// The duplicate rejection itself is on job-f's topic; the queries must
+	// have added nothing there.
+	if after := len(rec.messages("job-f", "status")); after != before+1 && after != before {
+		t.Errorf("the status query published on the queried job's topic: %v", rec.messages("job-f", "status"))
+	}
+	for _, s := range rec.messages("job-f", "status") {
+		if s["status"] == "completed" {
+			t.Errorf("a failed job must never be reported completed on its topic: %v", s)
+		}
+	}
+	if got := rec.messages("never-seen", "status"); len(got) != 0 {
+		t.Errorf("a query for an unknown job wrote to that job's topic: %v", got)
+	}
+}
+
+// gateRunner blocks every run until release is closed.
+type gateRunner struct{ release chan struct{} }
+
+func (g gateRunner) Run(context.Context, *commands.Command, bool, func(rclone.Progress)) (rclone.Outcome, error) {
+	<-g.release
+	return rclone.Outcome{}, nil
+}
+
+func TestParallelJobsAreBoundedByThePolicy(t *testing.T) {
+	gate := gateRunner{release: make(chan struct{})}
+	m, rec := newTestManagerWith(gate, func(p *policy.Policy) { p.MaxParallelJobs = 1 })
+	m.Handle([]byte(`{"job_id":"job-a","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer"}`))
+	rec.waitStatus(t, "job-a", "started")
+	m.Handle([]byte(`{"job_id":"job-b","action":"copy","source":"/data/input","target":"s3-demo:trailtransfer"}`))
+	if p := payloadOf(t, rec.waitResult(t, "job-b")); p["status"] != "rejected" || p["reason"] != "too_many_jobs" {
+		t.Fatalf("a job beyond max_parallel_jobs must be rejected as too_many_jobs, got %+v", p)
+	}
+	close(gate.release)
+	rec.waitResult(t, "job-a")
 }

@@ -7,6 +7,105 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Fixes from an internal review of 0.1.1 (8 November 2026). Upgrade if a
+worker receives commands from senders you do not fully control. Three
+changes can refuse commands or configurations that 0.1.1 accepted; they are
+listed under "Changed" with what to do.
+
+### Security
+
+- **Targets outside the allowed path.** The policy compared targets as
+  plain text, so a target that spelt a path outside the allowlisted one could
+  pass and rclone wrote outside it. Sources and targets are now parsed and
+  normalised before the comparison; parent segments in any spelling, encoded
+  separators, backslashes, control characters, rclone on-the-fly backends
+  and connection-string parameters are refused, for targets as for sources.
+  For local paths, symbolic links are resolved and the resolved path must
+  stay inside the resolved allowed root as well, which also closes a source
+  that is a link out of its root. rclone receives, and the record names, the
+  normalised form that was checked.
+- **A command could take the worker off the broker.** A `job_id` or
+  `target_job_id` that is not a valid MQTT topic level led the worker to
+  publish to an invalid topic; the broker disconnected it and the worker did
+  not recover until it was killed. Both are now limited to 1 to 128
+  characters from `A-Z a-z 0-9 . _ -`; a command with another `job_id` is
+  logged and dropped. The MQTT message callback now only queues commands and
+  never waits for a publish, and commands above 64 KiB are rejected.
+- **`move` ignored `allow_delete: false`.** `move` deletes the source after
+  the transfer; it is now refused unless the policy sets `allow_delete: true`.
+- **A dry run was recorded as a transfer.** A job that ran as a dry run
+  (for example through `dry_run_default`) was sealed with the counters of
+  the transfer rclone would have made. Records now carry `dry_run`; a dry run
+  records `files_transferred` and `bytes_transferred` as 0, and its status
+  says so.
+
+### Fixed
+
+- **Journal write failures.** A result that could not be written to the
+  journal was published unsealed, without a log line, and the worker went on
+  as `healthy`. Now nothing is published unsealed; the error is logged, the
+  sealer refuses every later record, health reports `unhealthy` with the
+  reason, and new jobs are refused until the worker is restarted.
+- **Size limit.** Files above `max_file_size_mb` are skipped by rclone
+  without an error. The record of a job that ran under the limit now carries
+  `max_file_size_mb`, and its status says that larger files were excluded and
+  not counted.
+- **Status queries.** A `status` command reported `completed` for any
+  finished job, including failed ones, and published on the queried job's
+  topic. It now answers on its own topic with `target_job_id` and
+  `target_status`, the stored outcome.
+- **Typos in the policy and the config file** were ignored, so a misspelt
+  `dry_run_default` turned every command without `dry_run` into a real
+  transfer. Both files are now read strictly; see "Changed".
+- **`verify` says what it did not check**: signatures without a key or on
+  unsigned records, records cut off after the last record, and the
+  transferred files. A journal whose first record continues a segment that is
+  not in the file is noted as "previous segment not in this journal"; a
+  journal without records is reported as `EMPTY` with exit code 1 instead of
+  `OK`.
+
+### Changed
+
+- **`job_id` character set.** Commands whose `job_id` uses characters other
+  than `A-Z a-z 0-9 . _ -` or is longer than 128 characters are dropped.
+  Senders that use other characters need to change their ids.
+- **Strict policy and config.** An unknown or misspelt key, an action other
+  than `copy`, `move`, `sync` and `check` (including `cancel` and `status`,
+  which are always available), an allowlist entry with a parent segment or a
+  relative local path, or a negative `max_file_size_mb` now make
+  `validate-config` fail and stop the worker from starting. Run
+  `trailtransfer validate-config` before upgrading.
+- **`move` needs `allow_delete: true`.** Policies that allow `move` and rely
+  on it must set `allow_delete: true`.
+- Source names that only contain two dots, such as `report..2026`, are no
+  longer refused.
+- Rejection details for targets now read "is not under any allowed_targets
+  entry".
+- A rejection now publishes its sealed result before its `rejected` status
+  event, in the same order as jobs that ran.
+
+### Added
+
+- `make negative-paths` (`scripts/negative-paths.sh`): the edge cases above
+  on a local Mosquitto and rclone, without Docker (`docs/TESTING.md`, L4).
+- Payload fields `dry_run` and `max_file_size_mb`, status fields
+  `target_job_id` and `target_status`, and a `detail` in health events.
+  All are additive.
+- An evaluation report issue form, a support statement (best effort, no paid
+  support) and the private vulnerability-reporting path in `SECURITY.md`
+  (#9).
+- `make first-use` installs the pinned trail-evidence verifier for its L3
+  step instead of skipping it when none is on `PATH` (#11).
+
+### Removed
+
+- `docs/COMPLIANCE.md`, and the compliance and service statements in
+  `docs/CONCEPT.md` and `CONTRIBUTING.md`. What the operator has to provide
+  for the journal is now in `docs/EVIDENCE_MODEL.md`; the security model, the
+  test behind each threat and the known limits (no TLS to the broker,
+  deduplication only within one process, pattern-based redaction) are in
+  `SECURITY.md`.
+
 ## [0.1.1] - 2026-11-07
 
 ### Security

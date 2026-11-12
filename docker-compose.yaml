@@ -44,7 +44,7 @@ services:
 
   mqtt:
     image: eclipse-mosquitto:2
-    ports: ["1883:1883"]
+    ports: ["${MQTT_PORT:-1883}:1883"]
     volumes:
       - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
@@ -54,7 +54,7 @@ services:
   s3:
     image: rclone/rclone:1.68
     command: ["serve", "s3", "/data", "--addr", ":9000", "--auth-key", "demo,demo-secret-12345"]
-    ports: ["9000:9000"]
+    ports: ["${S3_PORT:-9000}:9000"]
     volumes:
       - s3-data:/data
 

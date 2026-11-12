@@ -47,7 +47,11 @@ type VerifyReport struct {
 	SignaturesChecked int  // records whose signature was verified with pub
 	Unsigned          int  // records without a signature, counted only when pub is given
 	Restarts          int  // records with chain_restart=true
-	Findings          []Finding
+	// PreviousSegmentMissing is set when the first record is a restart
+	// anchored at a chain_hash other than genesis: the segment it continues
+	// is not in this file, so its records were not checked.
+	PreviousSegmentMissing bool
+	Findings               []Finding
 }
 
 // Count returns the number of findings with the given code.
@@ -161,8 +165,12 @@ func VerifyReader(r io.Reader, pub ed25519.PublicKey) (VerifyReport, error) {
 
 		if rec.ChainRestart {
 			rep.Restarts++
-			rep.Findings = append(rep.Findings, Finding{Index: idx, Seq: seq, Code: CodeRestart,
-				Message: fmt.Sprintf("chain restart anchored at %s", shortHash(rec.AnchorHash))})
+			msg := fmt.Sprintf("chain restart anchored at %s", shortHash(rec.AnchorHash))
+			if idx == 0 && rec.AnchorHash != GenesisHash {
+				rep.PreviousSegmentMissing = true
+				msg += "; previous segment not in this journal"
+			}
+			rep.Findings = append(rep.Findings, Finding{Index: idx, Seq: seq, Code: CodeRestart, Message: msg})
 			switch {
 			case rec.PrevHash != rec.AnchorHash:
 				rep.add(idx, seq, CodeChainBreak, "prev_hash differs from anchor_hash on a restart")

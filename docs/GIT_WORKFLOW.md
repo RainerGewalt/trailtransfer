@@ -3,8 +3,9 @@
 TrailTransfer is maintained by one person with occasional outside
 contributions, so the workflow is deliberately small.
 
-- `main` is the only long-lived branch. It is the default branch, it is
-  protected, and it must always build and pass `make test`.
+- `main` is the only long-lived branch. It is the default branch and it must
+  always build and pass `make test`. Branch protection is not switched on in
+  the repository settings; the rules below are kept by convention.
 - Every change, including the maintainer's own, comes in on a short-lived
   branch (`feat/…`, `fix/…`, `docs/…`, `chore/…`) and is merged through a
   pull request once CI is green. Squash or fast-forward, no merge commits

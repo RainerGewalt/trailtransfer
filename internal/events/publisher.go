@@ -47,6 +47,16 @@ func (p *Publisher) Status(jobID, status, detail string) {
 	})
 }
 
+// StatusAnswer answers a status query on the query's own status topic with
+// the queried job's last known status.
+func (p *Publisher) StatusAnswer(queryJobID, targetJobID, targetStatus string) {
+	p.send(p.cfg.JobStatusTopic(queryJobID), 1, false, StatusEvent{
+		EventType: TypeStatus, JobID: queryJobID, WorkerID: p.cfg.WorkerID,
+		Status: "completed", Detail: "job " + targetJobID + ": " + targetStatus,
+		TargetJobID: targetJobID, TargetStatus: targetStatus, Timestamp: now(),
+	})
+}
+
 // Progress publishes a progress sample (QoS 0). Identity/timestamp are filled.
 func (p *Publisher) Progress(jobID string, e ProgressEvent) {
 	e.EventType, e.JobID, e.WorkerID, e.Timestamp = TypeProgress, jobID, p.cfg.WorkerID, now()
@@ -65,7 +75,10 @@ func (p *Publisher) Log(jobID, level, msg string) {
 // trail.evidence/1 record in the evidence hash chain (and journal), then
 // publishes the sealed record (QoS 1). The caller fills the semantic fields;
 // actor records who caused it.
-func (p *Publisher) Result(r ResultEvent, actor *evidence.Actor) {
+//
+// If the result cannot be sealed, nothing is published and the error is
+// returned: a result travels only as a sealed record.
+func (p *Publisher) Result(r ResultEvent, actor *evidence.Actor) error {
 	r.EventType = TypeResult
 	r.WorkerID = p.cfg.WorkerID
 	r.WorkerVersion = p.ver
@@ -78,12 +91,14 @@ func (p *Publisher) Result(r ResultEvent, actor *evidence.Actor) {
 	}
 	rec, err := p.sealer.Seal(eventType, r.JobID, r, actor)
 	if err != nil {
-		// Never drop a result: fall back to the unsealed payload.
-		p.send(p.cfg.JobResultTopic(r.JobID), 1, false, r)
-		return
+		return err
 	}
 	_ = p.mq.Publish(p.cfg.JobResultTopic(r.JobID), 1, false, rec)
+	return nil
 }
+
+// EvidenceErr returns the journal write error that stopped sealing, or nil.
+func (p *Publisher) EvidenceErr() error { return p.sealer.Err() }
 
 // Health publishes the retained heartbeat (QoS 1, retained).
 func (p *Publisher) Health(e HealthEvent) {

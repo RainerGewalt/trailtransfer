@@ -1,7 +1,7 @@
 # Quickstart (5 minutes)
 
 No prior knowledge needed. You'll start a worker, send it a job over MQTT, watch
-the result, and independently verify the audit trail.
+the result, and verify its journal independently.
 
 ## 1. Start the demo stack
 
@@ -64,7 +64,14 @@ no cloud:
 docker compose exec trailtransfer trailtransfer verify /data/evidence/journal.jsonl
 # OK: N record(s), 1 restart(s)
 #   restart            1
+# not checked:
+#   - signatures: the records are not signed
+#   - records cut off after the last record, or a journal replaced as a whole: …
+#   - the transferred files themselves: the journal holds no file manifest
 ```
+
+The lines under "not checked" are part of the answer: `OK` means the records
+in this file are unchanged and in order, nothing more.
 
 Change a value in a copy of that file and verify the copy: it reports the
 record that no longer matches its hash. Without a signing key this shows edits
@@ -77,4 +84,4 @@ key sealed a record; see [`EVIDENCE_MODEL.md`](EVIDENCE_MODEL.md) for what
 
 - Interfaces: [`MQTT_CONTRACT.md`](MQTT_CONTRACT.md) · schemas in [`../schemas/`](../schemas)
 - Policy: [`POLICY.md`](POLICY.md) · Security: [`SECURITY_POLICY.md`](SECURITY_POLICY.md)
-- Audit/evidence: [`EVIDENCE_MODEL.md`](EVIDENCE_MODEL.md) · Compliance: [`COMPLIANCE.md`](COMPLIANCE.md)
+- Journal and its limits: [`EVIDENCE_MODEL.md`](EVIDENCE_MODEL.md) · Security model and known limits: [`../SECURITY.md`](../SECURITY.md)

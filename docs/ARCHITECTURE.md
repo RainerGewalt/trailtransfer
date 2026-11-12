@@ -122,8 +122,10 @@ The executable actions are `copy`, `move`, `sync`, and `check`. The control
 actions are `cancel` and `status`.
 
 `internal/commands.Decode` uses `encoding/json.Decoder` with
-`DisallowUnknownFields`. It requires a non-empty `job_id`, rejects unknown
-actions, and requires `target_job_id` for control actions. There is deliberately
+`DisallowUnknownFields`. It rejects payloads above 64 KiB, requires a `job_id`
+of 1 to 128 characters from `A-Z a-z 0-9 . _ -` (it becomes a topic level),
+rejects unknown actions, and requires a `target_job_id` from the same
+character set for control actions. There is deliberately
 no `args`, `flags`, or equivalent pass-through field. The published JSON Schema
 under `schemas/` documents the external contract; runtime validation is also
 implemented in Go and does not execute the schema document dynamically.
@@ -135,8 +137,8 @@ uses the policy's `dry_run_default`. Filter values become individual rclone
 
 ## Current policy boundary
 
-The worker policy is loaded from local YAML. MQTT commands cannot change its
-allowlists or limits. The active checks are:
+The worker policy is loaded from local YAML with unknown keys rejected. MQTT
+commands cannot change its allowlists or limits. The active checks are:
 
 - the action must appear in `allowed_actions`;
 - the source must equal or sit beneath one of the `allowed_sources` roots;
@@ -144,21 +146,25 @@ allowlists or limits. The active checks are:
 - an absolute local target additionally requires `allow_absolute_targets`;
 - `sync` additionally requires `allow_sync_delete`, because it can delete data
   from the target;
+- `move` additionally requires `allow_delete`, because it deletes the source;
 - admitted jobs are bounded by `max_parallel_jobs`;
 - `max_file_size_mb` becomes rclone's `--max-size` argument;
 - an omitted command-level `dry_run` uses `dry_run_default`.
 
-`copy` and `check` are non-destructive. `move` deletes source data after a
-successful transfer and is currently controlled by its presence in
-`allowed_actions`. `sync` may delete target data and has the additional guard
-described above. There is no generic delete or purge command.
+`copy` and `check` are non-destructive. There is no generic delete or purge
+command.
 
-The current local-source check rejects any input containing `..`, cleans the
-path with `filepath.Clean`, and performs a separator-aware root-prefix check.
-This prevents ordinary lexical traversal and prefix confusion such as treating
-`/data/input-other` as a child of `/data/input`. It does not resolve symbolic
-links. Remote targets are compared with configured alias/path strings and are
-not read from `rclone.conf` by the policy engine.
+`internal/policy/paths.go` parses every source, target and allowlist entry
+into a remote name and a path, normalises the path (repeated `/`, `.`
+segments, trailing `/`), and refuses parent segments in any spelling,
+encoded separators, backslashes, control characters, on-the-fly backends and
+connection-string parameters. The comparison is exact and separator-aware, so
+`/data/input-other` is not a child of `/data/input`. For local paths it also
+resolves symbolic links in the value and in the root and repeats the
+comparison on the resolved paths. Remote paths are not resolved further: the
+policy engine does not read `rclone.conf`. The normalised form is what the
+manager hands to rclone and what the result records; `docs/POLICY.md` has the
+rules.
 
 Each loaded policy receives:
 
@@ -171,14 +177,19 @@ Both values are included in terminal transfer results.
 
 `internal/jobs.Manager` owns the in-process execution state:
 
+- a bounded queue (256 commands) between the MQTT message callback and a
+  single goroutine that handles commands in arrival order, so the callback
+  never waits for a publish;
 - `seen` records admitted job IDs and rejects a repeated ID as
   `duplicate_job_id`;
+- `outcome` holds each handled job's last known status for status queries;
 - `running` enforces the policy's `max_parallel_jobs` limit;
 - `active` maps running job IDs to `context.CancelFunc` values;
-- a mutex protects all three structures.
+- a mutex protects these structures.
 
-Deduplication is process-local. Restarting the worker clears `seen`; persistent
-job-state semantics are not part of the current implementation.
+Deduplication is process-local. Restarting the worker clears `seen` and
+`outcome`; persistent job-state semantics are not part of the current
+implementation.
 
 For an executable command, the manager follows this sequence:
 
@@ -192,9 +203,10 @@ admitted command                    -> accepted -> started -> terminal result
 The terminal transfer status is `completed`, `failed`, `cancelled`, or
 `rejected`. Progress samples are emitted while rclone reports statistics.
 
-`cancel` looks up an active target job and cancels its context. `status` reports
-whether the target job is active, previously seen, or unknown. These control
-actions do not invoke rclone.
+`cancel` looks up an active target job and cancels its context. `status`
+answers on the query's own topic with the target job's last known status
+(`target_status`). These control actions do not invoke rclone and are not
+sealed.
 
 ## rclone execution boundary
 
@@ -273,11 +285,14 @@ verify` independently checks schema, hashes, links, sequence and restarts, and
 can verify signatures when given the corresponding public key.
 
 MQTT publication is synchronous at the client boundary, but failed publishes
-are not queued durably. If sealing fails, the publisher attempts to publish the
-unsealed result payload so the terminal outcome is not silently discarded.
+are not queued durably. A result is published only as a sealed record. The
+first failed journal write stops the sealer for the rest of the process: the
+error is logged, nothing is published unsealed, health turns `unhealthy`, and
+the manager refuses every new job until the worker is restarted.
 
 The command field `operator` is self-declared. Strong command identity depends
-on broker authentication, ACLs, TLS or mTLS, and deployment governance.
+on broker authentication, ACLs and deployment governance. The client connects
+over plain TCP; TLS is not supported.
 
 ## Container architecture
 
@@ -302,9 +317,14 @@ demo-only. The worker exposes no inbound HTTP or SSH service.
 
 The maintained unit tests cover:
 
-- strict command decoding and unknown-field rejection;
-- action, source, target, traversal, and sync-policy decisions;
-- job completion, rejection, dry-run defaults, and in-process deduplication;
+- strict command decoding, unknown-field rejection and the `job_id` character
+  set;
+- action, source, target, path normalisation, symbolic links, traversal in
+  any spelling, and the sync and move guards; strict policy and config
+  loading;
+- job completion, rejection, dry-run records, size-limit notes, status
+  queries, a journal write failure, the non-blocking command queue, and
+  in-process deduplication;
 - rclone argument construction and unsafe filter rejection;
 - JCS canonicalization and hashing;
 - evidence-chain creation, recovery, tamper detection, signing, and signature
@@ -323,9 +343,11 @@ make lint
 make build
 ```
 
-There is no integration test suite for MQTT, rclone and S3 yet; the Docker
-demo is checked by hand before a release. It must not be reported as
-integration coverage.
+`make negative-paths` runs the edge cases of the policy and the journal
+against a real Mosquitto and rclone without Docker, and `make first-use` runs
+the documented Quickstart on the Docker demo; both are run by hand before a
+release and are described in [`TESTING.md`](TESTING.md). Neither covers SFTP,
+a real S3 service, crashes or restarts during a broker outage.
 
 ## Archived legacy implementation
 

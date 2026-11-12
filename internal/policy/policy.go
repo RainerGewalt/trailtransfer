@@ -4,12 +4,17 @@
 package policy
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/RainerGewalt/trailtransfer/internal/commands"
 )
 
 // Policy is the operator-authored allowlist and set of guards for one worker.
@@ -37,21 +42,51 @@ type Policy struct {
 	Hash string `yaml:"-"`
 }
 
-// Load reads and validates a worker policy file.
+// Load reads and validates a worker policy file. It is strict: an unknown or
+// misspelt key, an action other than copy, move, sync and check, and an
+// allowed source or target that cannot be compared safely are errors, so that
+// a typo cannot switch a protection off without notice.
 func Load(path string) (*Policy, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read policy %q: %w", path, err)
 	}
 	var p Policy
-	if err := yaml.Unmarshal(raw, &p); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(&p); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("parse policy %q: the file is empty", path)
+		}
 		return nil, fmt.Errorf("parse policy %q: %w", path, err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("parse policy %q: more than one YAML document", path)
 	}
 	if p.PolicyVersion == "" {
 		return nil, fmt.Errorf("policy_version is required")
 	}
 	if len(p.AllowedActions) == 0 {
 		return nil, fmt.Errorf("allowed_actions must list at least one action")
+	}
+	for _, a := range p.AllowedActions {
+		if !commands.Action(a).Executable() {
+			return nil, fmt.Errorf("allowed_actions: %q is not one of copy, move, sync, check (cancel and status are always available)", a)
+		}
+	}
+	for _, s := range p.AllowedSources {
+		if _, err := parseLocation(s); err != nil {
+			return nil, fmt.Errorf("allowed_sources: %s %s", quote(s), err)
+		}
+	}
+	for _, t := range p.AllowedTargets {
+		if _, err := parseLocation(t); err != nil {
+			return nil, fmt.Errorf("allowed_targets: %s %s", quote(t), err)
+		}
+	}
+	if p.MaxFileSizeMB < 0 {
+		return nil, fmt.Errorf("max_file_size_mb must not be negative")
 	}
 	if p.MaxParallelJobs <= 0 {
 		p.MaxParallelJobs = 1

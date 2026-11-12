@@ -254,6 +254,11 @@ func cmdVerify(args []string) {
 	if err != nil {
 		fatal(err)
 	}
+	if rep.Entries == 0 {
+		// Nothing was checked, which is not the same as nothing being wrong.
+		fmt.Println("EMPTY: 0 record(s), nothing was verified; check that this is the journal you meant")
+		os.Exit(1)
+	}
 	verdict := "OK"
 	if !rep.OK {
 		verdict = "FAIL"
@@ -279,13 +284,34 @@ func cmdVerify(args []string) {
 	}
 	for _, f := range rep.Findings {
 		if f.Code == evidence.CodeRestart && rep.OK {
-			continue // restarts are informational; list them only next to real findings
+			// Restarts are informational; list them only next to real
+			// findings, except the one that says records are missing.
+			if f.Index == 0 && rep.PreviousSegmentMissing {
+				fmt.Println("  note: " + f.String())
+			}
+			continue
 		}
 		fmt.Println("  - " + f.String())
 	}
+	printNotChecked(rep, pub != nil)
 	if !rep.OK {
 		os.Exit(1)
 	}
+}
+
+// printNotChecked says what a verify run does not establish, as plainly as
+// the verdict says what it does (docs/EVIDENCE_MODEL.md, threat table).
+func printNotChecked(rep evidence.VerifyReport, withKey bool) {
+	fmt.Println("not checked:")
+	switch {
+	case withKey:
+	case rep.Signed:
+		fmt.Println("  - signatures: no --pubkey given")
+	default:
+		fmt.Println("  - signatures: the records are not signed")
+	}
+	fmt.Println("  - records cut off after the last record, or a journal replaced as a whole: compare the last chain_hash with a copy kept outside the journal")
+	fmt.Println("  - the transferred files themselves: the journal holds no file manifest")
 }
 
 // evidencePolicy maps the loaded worker policy to the record's policy member.
