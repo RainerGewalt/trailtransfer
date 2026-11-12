@@ -7,6 +7,8 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-12
+
 Fixes from an internal review of 0.1.1 (8 November 2026). Upgrade if a
 worker receives commands from senders you do not fully control. Three
 changes can refuse commands or configurations that 0.1.1 accepted; they are
@@ -254,6 +256,7 @@ First release of TrailTransfer, the Go successor of FileFlux.
   trusted time and key management remain operator responsibilities. No GxP,
   Part 11 or certification claim is made.
 
-[Unreleased]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/RainerGewalt/trailtransfer/releases/tag/v0.1.0
