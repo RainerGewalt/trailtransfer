@@ -21,7 +21,12 @@ type Publisher struct {
 	cfg    *config.Config
 	ver    string
 	sealer *evidence.Sealer
+	outbox *Outbox
 }
+
+// SetOutbox routes sealed records through the journal-backed outbox instead
+// of publishing them directly. Call it before the first job is handled.
+func (p *Publisher) SetOutbox(o *Outbox) { p.outbox = o }
 
 // NewPublisher builds a publisher bound to a client, config, worker version and
 // the evidence sealer used to chain-link and journal result records.
@@ -77,7 +82,9 @@ func (p *Publisher) Log(jobID, level, msg string) {
 // actor records who caused it.
 //
 // If the result cannot be sealed, nothing is published and the error is
-// returned: a result travels only as a sealed record.
+// returned: a result travels only as a sealed record. With an outbox the
+// record is published from the journal, also after a broker outage or a
+// restart; without one (no journal) it is published once, directly.
 func (p *Publisher) Result(r ResultEvent, actor *evidence.Actor) error {
 	r.EventType = TypeResult
 	r.WorkerID = p.cfg.WorkerID
@@ -86,12 +93,19 @@ func (p *Publisher) Result(r ResultEvent, actor *evidence.Actor) error {
 		r.Errors = []string{}
 	}
 	eventType := EvidenceJobResult
-	if r.Status == "rejected" {
+	switch r.Status {
+	case "rejected":
 		eventType = EvidenceJobRejected
+	case StatusInterrupted:
+		eventType = EvidenceJobInterrupted
 	}
 	rec, err := p.sealer.Seal(eventType, r.JobID, r, actor)
 	if err != nil {
 		return err
+	}
+	if p.outbox != nil {
+		p.outbox.Notify()
+		return nil
 	}
 	_ = p.mq.Publish(p.cfg.JobResultTopic(r.JobID), 1, false, rec)
 	return nil

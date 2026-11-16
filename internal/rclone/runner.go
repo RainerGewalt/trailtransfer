@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"os/exec"
+	"runtime"
 
 	"github.com/RainerGewalt/trailtransfer/internal/commands"
 	"github.com/RainerGewalt/trailtransfer/internal/logging"
@@ -39,7 +40,13 @@ func (r *Runner) Run(ctx context.Context, c *commands.Command, dryRun bool, onPr
 		return Outcome{}, err
 	}
 
+	// bindToWorker ties rclone to the thread that starts it; the thread has
+	// to live as long as rclone does.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	cmd := exec.CommandContext(ctx, r.RclonePath, args...)
+	bindToWorker(cmd)
 	cmd.Stdin = nil
 	cmd.Stdout = nil // discard; all progress is on stderr as JSON
 	stderr, err := cmd.StderrPipe()

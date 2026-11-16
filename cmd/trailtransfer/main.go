@@ -59,6 +59,9 @@ func main() {
 	}
 }
 
+// shutdownTimeout bounds the wait for running jobs to be ended and sealed.
+const shutdownTimeout = 15 * time.Second
+
 func usage() {
 	fmt.Fprint(os.Stderr, `trailtransfer — MQTT-controlled rclone worker for edge file transfers with a verifiable journal
 
@@ -139,6 +142,27 @@ func cmdRun(args []string) {
 	pub := events.NewPublisher(client, cfg, version.String(), sealer)
 	mgr := jobs.NewManager(pol, pub, runner, log)
 
+	// With a journal the job state survives a restart: job IDs and outcomes
+	// come back from the journal, jobs that were running are sealed as
+	// interrupted, and sealed records are published from the journal, also
+	// those the broker has not confirmed yet (docs/ARCHITECTURE.md,
+	// "Restart and recovery").
+	var outbox *events.Outbox
+	if sealer.JournalEnabled() {
+		outbox, err = events.NewOutbox(cfg.EvidenceJournal, client, cfg.JobResultTopic, log)
+		if err != nil {
+			fatal(fmt.Errorf("outbox: %w", err))
+		}
+		pub.SetOutbox(outbox)
+		interrupted, err := mgr.Recover(cfg.EvidenceJournal, cfg.EvidenceJournal+".jobs")
+		if err != nil {
+			fatal(fmt.Errorf("recover job state: %w (docs/ARCHITECTURE.md, \"Restart and recovery\")", err))
+		}
+		if interrupted > 0 {
+			log.Warn("jobs sealed as interrupted after the last stop", "count", interrupted)
+		}
+	}
+
 	caps := events.CapabilitiesEvent{
 		SupportedActions: mgr.SupportedActions(),
 		MaxParallelJobs:  pol.MaxParallelJobs,
@@ -170,9 +194,22 @@ func cmdRun(args []string) {
 	defer stop()
 
 	health.StartLoop(ctx, pub, pol, mgr, cfg.RcloneBinary, time.Duration(cfg.HealthIntervalSeconds)*time.Second)
+	if outbox != nil {
+		go outbox.Run(ctx)
+	}
 
 	<-ctx.Done()
 	log.Info("shutting down")
+	if n := mgr.Shutdown(shutdownTimeout); n > 0 {
+		log.Warn("running jobs ended by the shutdown and sealed as interrupted", "count", n)
+	}
+	if outbox != nil {
+		// One last attempt; what the broker does not confirm now is
+		// published by the next start.
+		if err := outbox.Drain(); err != nil {
+			log.Warn("records left for the next start", "error", err)
+		}
+	}
 	pub.Health(events.HealthEvent{
 		Status:           "stopped",
 		MaxParallelJobs:  pol.MaxParallelJobs,

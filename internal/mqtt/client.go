@@ -3,6 +3,7 @@
 package mqtt
 
 import (
+	"errors"
 	"time"
 
 	paho "github.com/eclipse/paho.mqtt.golang"
@@ -68,12 +69,26 @@ func (c *Client) Connect() error {
 	return tok.Error()
 }
 
-// Publish sends a message and waits for the handoff to complete.
+// publishTimeout bounds the wait for a broker confirmation. A job must not
+// hang on a status message because the broker is away.
+const publishTimeout = 10 * time.Second
+
+// ErrNotConfirmed reports that the broker did not confirm a publish in time.
+// The client may still deliver the message after a reconnect.
+var ErrNotConfirmed = errors.New("mqtt: publish not confirmed by the broker in time")
+
+// Publish sends a message and waits up to publishTimeout for the broker's
+// confirmation (QoS 1) or the handoff (QoS 0).
 func (c *Client) Publish(topic string, qos byte, retain bool, payload []byte) error {
 	tok := c.c.Publish(topic, qos, retain, payload)
-	tok.Wait()
+	if !tok.WaitTimeout(publishTimeout) {
+		return ErrNotConfirmed
+	}
 	return tok.Error()
 }
+
+// IsConnected reports whether the client has a broker connection right now.
+func (c *Client) IsConnected() bool { return c.c.IsConnectionOpen() }
 
 // Subscribe registers a callback for a topic filter.
 func (c *Client) Subscribe(topic string, qos byte, cb func(topic string, payload []byte)) error {
