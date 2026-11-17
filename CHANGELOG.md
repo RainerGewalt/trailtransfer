@@ -7,6 +7,52 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Restart safety (#1). No new commands and no new configuration; everything
+below needs `evidence_journal`.
+
+### Fixed
+
+- A command that is delivered again after a restart no longer runs a second
+  time. The job IDs that have an outcome come back from the journal, and
+  the `duplicate_job_id` rejection names the stored status. 0.1.2 started
+  the job again.
+- A job that was running when the worker stopped no longer vanishes. On
+  SIGTERM or SIGINT the worker ends rclone and seals the job as
+  `transfer.job.interrupted` (`reason: worker_shutdown`); after a crash, a
+  kill or a power loss the next start seals it (`reason: worker_restart`),
+  exactly once. No job is resumed or run again. 0.1.2 left no record and,
+  on SIGTERM, left rclone running.
+- A result that is sealed while the broker is away is published after the
+  connection is back, also when the worker restarts in between. Records are
+  published from the journal in journal order, at least once.
+- On Linux rclone ends with the worker, also when the worker is killed.
+- A second worker on the same journal no longer starts (Linux and macOS):
+  two processes appending to one journal would break its chain.
+- The worker stops within seconds when the broker is away; a status message
+  no longer holds a job or the shutdown for the length of the outage.
+
+### Changed
+
+- New evidence event type `transfer.job.interrupted` with status
+  `interrupted`; new rejection reasons `state_unavailable` (the job state
+  could not be written, rclone was not started) and `worker_stopping`.
+  `schemas/transfer-job-result.schema.json` lists them.
+- Three files appear next to the journal: `<journal>.jobs` (running jobs),
+  `<journal>.outbox` (publishing position) and `<journal>.lock`. On the first start with this
+  version the records already in the journal are not published again.
+- Status, progress and log messages are no longer queued by the MQTT client
+  while the broker is away; sealed records are.
+- A journal that ends in an incomplete line stops the worker at the start,
+  as before, now also when the incomplete line happens to be valid JSON
+  without a line ending.
+
+### Not changed
+
+- An interrupted record does not say what rclone had already written
+  (#2). The answer to a repeated `job_id` is a rejection that names the
+  stored status, not the stored record again. Attempt identifiers are not
+  introduced, because a `job_id` is executed at most once.
+
 ## [0.1.2] - 2026-11-12
 
 Fixes from an internal review of 0.1.1 (8 November 2026). Upgrade if a

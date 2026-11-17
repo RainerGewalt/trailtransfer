@@ -68,6 +68,11 @@ and journal. Two sets:
   `mosquitto_sub`, `rclone` and a free port (`NEG_PORT`, default 15931). It
   reports every check and exits 1 if any failed; `TT=/path/to/binary` runs it
   against another build, which is how it was shown to fail before the fixes.
+  Check R4 starts a second worker on a journal that is in use. Checks R1
+  to R3 are the restart cases of issue #1 with the real binary:
+  the worker is killed during a transfer, stopped during a transfer, and
+  restarted while the broker is away; a stand-in for rclone plays the
+  transfer that is still running.
 
 **L5 First use.** `make first-use` (`scripts/first-use.sh`) walks through the
 README and `docs/QUICKSTART.md` as a new user would and stops at the first

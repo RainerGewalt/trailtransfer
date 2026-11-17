@@ -175,7 +175,7 @@ Both values are included in terminal transfer results.
 
 ## Job admission and lifecycle
 
-`internal/jobs.Manager` owns the in-process execution state:
+`internal/jobs.Manager` owns the execution state:
 
 - a bounded queue (256 commands) between the MQTT message callback and a
   single goroutine that handles commands in arrival order, so the callback
@@ -187,9 +187,8 @@ Both values are included in terminal transfer results.
 - `active` maps running job IDs to `context.CancelFunc` values;
 - a mutex protects these structures.
 
-Deduplication is process-local. Restarting the worker clears `seen` and
-`outcome`; persistent job-state semantics are not part of the current
-implementation.
+Without a journal this state lives only as long as the process. With a
+journal it survives a restart, see "Restart and recovery" below.
 
 For an executable command, the manager follows this sequence:
 
@@ -284,11 +283,87 @@ the sealer signs the ASCII bytes of each record's `chain_hash`. `trailtransfer
 verify` independently checks schema, hashes, links, sequence and restarts, and
 can verify signatures when given the corresponding public key.
 
-MQTT publication is synchronous at the client boundary, but failed publishes
-are not queued durably. A result is published only as a sealed record. The
-first failed journal write stops the sealer for the rest of the process: the
-error is logged, nothing is published unsealed, health turns `unhealthy`, and
-the manager refuses every new job until the worker is restarted.
+A result is published only as a sealed record. The first failed journal
+write stops the sealer for the rest of the process: the error is logged,
+nothing is published unsealed, health turns `unhealthy`, and the manager
+refuses every new job until the worker is restarted.
+
+## Restart and recovery
+
+Everything in this section needs `evidence_journal`. Without a journal the
+chain, the job IDs and the outcomes are in memory and end with the process.
+
+**Order before a transfer.** A command is decoded, checked by the policy and
+admitted. The job is then written to the state file `<journal>.jobs`
+(temporary file, `fsync`, rename, `fsync` of the directory), and only after
+that write has succeeded does the worker start rclone. If the state cannot
+be written, the job is refused as `state_unavailable` and rclone does not
+run. There is no moment at which rclone runs for a job the disk does not
+know. The reverse can happen: a worker that dies after the write and before
+rclone starts leaves a job in the state file that never ran; it is sealed
+as interrupted like any other, because the worker cannot tell the two apart.
+
+**After a start**, before the worker subscribes to commands:
+
+1. The journal is read once. Every `job_id` with a `transfer.job.result` or
+   `transfer.job.interrupted` record is refused again as `duplicate_job_id`,
+   and the detail names the stored status. Outcomes, including rejections,
+   answer status queries. A `job_id` that was only rejected can be sent
+   again, as in a running worker.
+2. Each job in the state file that has no outcome in the journal is sealed
+   as `transfer.job.interrupted` with `reason: worker_restart`. A job leaves
+   the state file only after its record is in the journal, and a job with a
+   record in the journal is never sealed again, so a crash at any point of
+   this step still ends in exactly one record.
+3. No job is resumed and none is run again. Whoever sent it decides, after a
+   look at the target, whether to send it under a new `job_id`.
+
+**On SIGTERM or SIGINT** the worker admits nothing new (a command that still
+arrives is rejected as `worker_stopping`), ends every running rclone, seals
+each of those jobs as `transfer.job.interrupted` with
+`reason: worker_shutdown`, and waits up to 15 s for that. What is not sealed
+in time is sealed by the next start.
+
+**A killed worker and rclone.** On Linux the kernel ends rclone when the
+worker dies (`PR_SET_PDEATHSIG`), so a job is not sealed as interrupted while
+its rclone still writes. On other systems a killed worker can leave rclone
+running.
+
+**Publishing.** Sealed records are published from the journal, in journal
+order, by an outbox that keeps its position in `<journal>.outbox`. The
+position moves only past records the broker has confirmed. A record sealed
+while the broker is away, or shortly before the worker stops, is published
+after the next connection, also by a later process. Delivery is at least
+once: a record can arrive twice, as the same bytes with the same `seq` and
+`chain_hash`, and consumers deduplicate on those. A worker that gets an
+outbox for the first time, or whose position file is missing or does not
+fit the journal, starts at the end of the journal and does not publish its
+history again. Status, progress and log messages are not queued: without a
+connection they are dropped, because they describe a moment that has passed.
+
+**What this does not cover.**
+
+- An interrupted record says that the worker did not see the job to its
+  end. It does not say which files rclone had already written, moved or
+  deleted; that needs the per-file manifest of
+  [#2](https://github.com/RainerGewalt/trailtransfer/issues/2) or a look at
+  the target.
+- A journal whose last line is cut off (for example after a power loss
+  during a write) stops the worker at the start, and so does a state file
+  that cannot be read. Nothing is repaired automatically. Keep a copy of the
+  journal, remove the incomplete last line or move the state file away, and
+  start again; the next record is a restart that `verify` reports.
+- The journal is read completely at every start, and the set of known
+  `job_id`s grows with it. Rotating the journal away also removes its
+  `job_id`s from the duplicate check.
+- One worker process per journal. On Linux and macOS a second worker on
+  the same journal does not start (`<journal>.lock`); on Windows two
+  processes on the same files are not detected.
+- The answer to a repeated `job_id` is a new `transfer.job.rejected` record
+  that names the stored status. The stored record itself is not published
+  again; it is in the journal under the same `job_id`.
+- Execution attempts have no identifier of their own, because a `job_id` is
+  executed at most once.
 
 The command field `operator` is self-declared. Strong command identity depends
 on broker authentication, ACLs and deployment governance. The client connects
@@ -323,8 +398,10 @@ The maintained unit tests cover:
   any spelling, and the sync and move guards; strict policy and config
   loading;
 - job completion, rejection, dry-run records, size-limit notes, status
-  queries, a journal write failure, the non-blocking command queue, and
-  in-process deduplication;
+  queries, a journal write failure, the non-blocking command queue,
+  deduplication, and the restart cases: a killed worker, a shutdown during a
+  transfer, an outcome in the journal with a stale state file, a state file
+  that cannot be written, and the outbox across an outage and a restart;
 - rclone argument construction and unsafe filter rejection;
 - JCS canonicalization and hashing;
 - evidence-chain creation, recovery, tamper detection, signing, and signature
@@ -346,8 +423,10 @@ make build
 `make negative-paths` runs the edge cases of the policy and the journal
 against a real Mosquitto and rclone without Docker, and `make first-use` runs
 the documented Quickstart on the Docker demo; both are run by hand before a
-release and are described in [`TESTING.md`](TESTING.md). Neither covers SFTP,
-a real S3 service, crashes or restarts during a broker outage.
+release and are described in [`TESTING.md`](TESTING.md). `negative-paths`
+includes a worker killed during a transfer, a worker stopped during a
+transfer and a restart during a broker outage (checks R1 to R3). Neither
+covers SFTP, a real S3 service, or a power loss.
 
 ## Archived legacy implementation
 

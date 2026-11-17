@@ -48,7 +48,7 @@ or a compromised sender can do.
 | Secret leakage | `rclone.conf` is never read or logged; remotes are referenced by alias; rclone error lines are masked by a pattern filter | `internal/logging/redact_test.go` (masked forms); limits below |
 | Destructive actions | `sync` needs `allow_sync_delete: true`, `move` needs `allow_delete: true`, both default `false`; `dry_run_default: true` makes a command without `dry_run` a trial | `TestSyncNeedsAllowSyncDelete`, `TestEvaluateRefusesMoveWhileAllowDeleteIsFalse`, `TestDryRunDefaultApplied`; `make negative-paths`, check S2 |
 | A policy typo that switches a guard off | an unknown or misspelt key, or an action other than `copy`, `move`, `sync`, `check`, makes the policy invalid: `validate-config` fails and the worker does not start; the same applies to the config file | `internal/policy/policy_test.go`, `internal/config/config_test.go`, `TestValidateConfigFailsOnAPolicyTypo`; `make negative-paths`, check S4 |
-| Replayed `job_id` | refused as `duplicate_job_id` while the worker runs; the set is lost on restart (limits below) | `TestHandleDedupesJobID` |
+| Replayed `job_id` | refused as `duplicate_job_id`; with a journal the job IDs that have an outcome come back from it after a restart, and a job that was running when the worker stopped is sealed as interrupted and not run again | `TestHandleDedupesJobID`, `TestRedeliveredCommandAfterRestartDoesNotRunAgain`, `TestKilledWorkerLeavesExactlyOneInterruptedRecord`; `make negative-paths`, check R1 |
 | Uncontrolled parallelism | the policy's `max_parallel_jobs`; a job beyond it is `rejected: too_many_jobs` | `TestParallelJobsAreBoundedByThePolicy` |
 | Large files | `max_file_size_mb` is passed to rclone as `--max-size`; larger files are skipped, not failed, and not counted; the record carries `max_file_size_mb` and the status says that larger files were excluded | `TestBuildArgsCopy`, `TestSizeLimitIsNamedInTheRecord`; `make negative-paths`, check E7 |
 | Evidence lost on a journal write failure | the first failed write stops sealing for the rest of the process; no result is published unsealed; the error is logged, health reports `unhealthy` and new jobs are refused until the worker is restarted | `TestSealerSealsNothingAfterAJournalWriteFailure`, `TestJournalWriteFailureStopsSealingAndRefusesNewJobs`; `make negative-paths`, check E6 |
@@ -61,13 +61,14 @@ or a compromised sender can do.
   Run the broker on the same host or in the same trusted network segment, or
   reach a remote broker through a tunnel (for example WireGuard or SSH port
   forwarding).
-- **Deduplication only within one process.** A `job_id` that was handled is
-  refused again until the worker restarts; after a restart the same command
-  runs again. Durable job state is planned in
-  [#1](https://github.com/RainerGewalt/trailtransfer/issues/1).
-- **A job running when the worker stops leaves no record**, and an rclone
-  process started from a shell can keep running after the worker exits
-  ([#1](https://github.com/RainerGewalt/trailtransfer/issues/1)).
+- **Deduplication across restarts needs the journal.** Without
+  `evidence_journal`, and for `job_id`s in a journal that was rotated away,
+  a command that is delivered again runs again.
+- **An interrupted job is not resumed and its effect is not known.** The
+  record says the worker did not see the job to its end, not what rclone had
+  already written, moved or deleted.
+- **A killed worker ends its rclone on Linux only.** On other systems rclone
+  can keep running after the worker was killed.
 - **Redaction is a pattern, not a guarantee.** It masks the value after
   `password`, `pass`, `secret`, `token`, `api_key`, `key` and `credential`
   followed by `=` or `:`. It does not catch credentials in URLs

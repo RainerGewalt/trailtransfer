@@ -175,6 +175,7 @@ func TestRedeliveredCommandAfterRestartDoesNotRunAgain(t *testing.T) {
 	<-r1.started
 	close(r1.release)
 	waitJournal(t, dir, 1)
+	p1.mgr.Shutdown(time.Second) // the first process has ended before the next starts
 
 	r2 := newBlockingRunner()
 	p2 := startProcess(t, dir, r2)

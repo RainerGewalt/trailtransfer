@@ -111,6 +111,13 @@ func cmdRun(args []string) {
 		sealOpts.Signer = signer
 		log.Info("evidence signing enabled", "key_id", signer.ID())
 	}
+	if cfg.EvidenceJournal != "" {
+		release, err := evidence.LockJournal(cfg.EvidenceJournal)
+		if err != nil {
+			fatal(err)
+		}
+		defer release()
+	}
 	sealer, err := evidence.NewSealer(sealOpts)
 	if err != nil {
 		fatal(fmt.Errorf("evidence journal: %w", err))

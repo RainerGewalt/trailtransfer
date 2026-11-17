@@ -158,8 +158,8 @@ Destructive semantics must be understood explicitly:
 - `dry_run_default: true` is the recommended onboarding and evaluation posture.
 
 The job manager limits concurrent work with `max_parallel_jobs`, supports
-context-based cancellation, and rejects a repeated `job_id` within the current
-worker process. That deduplication state is not yet durable across restarts.
+context-based cancellation, and rejects a repeated `job_id`; with a journal
+that also holds after a restart.
 
 The rclone runner constructs an explicit `[]string` argument vector and calls
 `exec.CommandContext`; it never uses a shell. Filters are validated before they

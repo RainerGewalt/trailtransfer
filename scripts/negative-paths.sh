@@ -9,7 +9,8 @@
 # without allow_delete, a status query after a failed job, a journal that
 # cannot be written, a policy with a typo, and the restart cases of issue #1:
 # a worker killed during a transfer, a worker stopped during a transfer, and
-# a result sealed while the broker is away and the worker restarts.
+# a result sealed while the broker is away and the worker restarts, and a
+# second worker on the same journal.
 #
 #   make negative-paths                         builds the working tree
 #   TT=/path/to/trailtransfer make negative-paths   checks another binary
@@ -594,6 +595,29 @@ if [[ $(journal_count neg-r3 r3-1) == 1 ]] && "$TT" verify "$work/neg-r3/journal
 else
 	fail "journal for r3-1: $(journal_count neg-r3 r3-1) record(s), $(head -n 2 "$work/neg-r3/verify.txt" 2>/dev/null | tr '\n' ' ')"
 fi
+
+# ---------------------------------------------------------------------------
+check "R4: a second worker on the same journal does not start"
+start_worker neg-r4
+out="$(TRAILTRANSFER_WORKER_ID=neg-r4 TRAILTRANSFER_MQTT_HOST=127.0.0.1 TRAILTRANSFER_MQTT_PORT="$PORT" \
+	TRAILTRANSFER_POLICY_FILE="$work/neg-r4/policy.yaml" TRAILTRANSFER_RCLONE_CONFIG="$work/rclone.conf" \
+	TRAILTRANSFER_RCLONE_BINARY="$RCLONE" TRAILTRANSFER_EVIDENCE_JOURNAL="$work/neg-r4/journal.jsonl" \
+	timeout 10 "$TT" run 2>&1)"
+code=$?
+if [[ $code == 1 ]] && grep -q 'in use by another worker' <<<"$out"; then
+	pass "exit 1: $(tail -n 1 <<<"$out" | cut -c1-160)"
+elif [[ $(uname -s) != Linux && $(uname -s) != Darwin ]]; then
+	note "not enforced on this system (exit $code)"
+else
+	fail "the second worker ran (exit $code): $(tail -n 1 <<<"$out" | cut -c1-160)"
+fi
+send neg-r4 "$(copy_job r4-1)"
+if wait_topic neg-r4 r4-1 result; then
+	pass "the first worker keeps working"
+else
+	fail "the first worker no longer answers"
+fi
+stop_worker || note "worker did not stop within 5 s after SIGTERM"
 
 # ---------------------------------------------------------------------------
 printf '\nNEGATIVE PATHS: %d passed, %d failed (binary %s)\n' "$passed" "$failed" "$("$TT" version)"
