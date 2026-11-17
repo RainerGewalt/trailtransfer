@@ -25,6 +25,10 @@ type Outbox struct {
 	mq      MQTT
 	topic   func(jobID string) string
 	log     *slog.Logger
+	// durable is the journal length the sealer has synced. Nothing beyond
+	// it is published: a line there may still be lost in a power loss, or
+	// its sync failed and the job was told that nothing was sealed.
+	durable func() int64
 
 	mu     sync.Mutex
 	offset int64
@@ -46,8 +50,8 @@ type connectionState interface{ IsConnected() bool }
 // updated, or whose cursor was removed, does not publish its history again.
 // A cursor behind the end of the journal means the journal was replaced; the
 // outbox then starts at the end of the journal it finds.
-func NewOutbox(journalPath string, mq MQTT, topic func(jobID string) string, log *slog.Logger) (*Outbox, error) {
-	o := &Outbox{journal: journalPath, cursor: journalPath + ".outbox", mq: mq, topic: topic, log: log, notify: make(chan struct{}, 1)}
+func NewOutbox(journalPath string, durable func() int64, mq MQTT, topic func(jobID string) string, log *slog.Logger) (*Outbox, error) {
+	o := &Outbox{journal: journalPath, cursor: journalPath + ".outbox", mq: mq, topic: topic, log: log, durable: durable, notify: make(chan struct{}, 1)}
 	size := int64(0)
 	if st, err := os.Stat(journalPath); err == nil {
 		size = st.Size()
@@ -65,8 +69,8 @@ func NewOutbox(journalPath string, mq MQTT, topic func(jobID string) string, log
 		return nil, err
 	default:
 		var c outboxCursor
-		if err := json.Unmarshal(raw, &c); err != nil || c.Offset < 0 || c.Offset > size {
-			log.Warn("outbox cursor does not fit the journal; records already in the journal are not published again", "cursor", o.cursor, "journal_bytes", size)
+		if err := json.Unmarshal(raw, &c); err != nil || c.Offset < 0 || c.Offset > size || !atLineStart(journalPath, c.Offset) {
+			log.Error("outbox cursor does not fit the journal; records already in the journal are not published again", "cursor", o.cursor, "journal_bytes", size)
 			o.offset = size
 			if err := o.save(0); err != nil {
 				return nil, fmt.Errorf("outbox cursor: %w", err)
@@ -78,14 +82,32 @@ func NewOutbox(journalPath string, mq MQTT, topic func(jobID string) string, log
 	return o, nil
 }
 
+// save makes the cursor durable. A cursor that is behind after a power loss
+// only publishes a record again; a cursor that cannot be read would skip
+// records, so it is written like the job state.
 func (o *Outbox) save(seq uint64) error {
 	raw, _ := json.Marshal(outboxCursor{Offset: o.offset, Seq: seq})
-	tmp := o.cursor + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, o.cursor)
+	return evidence.WriteFileAtomic(o.cursor, raw)
 }
+
+// atLineStart reports whether offset is the start of a journal line.
+func atLineStart(path string, offset int64) bool {
+	if offset == 0 {
+		return true
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	b := make([]byte, 1)
+	if _, err := f.ReadAt(b, offset-1); err != nil {
+		return false
+	}
+	return b[0] == '\n'
+}
+
+var errBeyondDurable = errors.New("record not synced yet")
 
 // Notify tells the outbox that the journal has a new record. It never blocks.
 func (o *Outbox) Notify() {
@@ -99,11 +121,7 @@ func (o *Outbox) Notify() {
 func (o *Outbox) Pending() int64 {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	st, err := os.Stat(o.journal)
-	if err != nil {
-		return 0
-	}
-	return st.Size() - o.offset
+	return o.durable() - o.offset
 }
 
 // Run publishes until ctx ends. A failed or unconfirmed publish is tried
@@ -130,12 +148,16 @@ func (o *Outbox) Drain() error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if cs, ok := o.mq.(connectionState); ok && !cs.IsConnected() {
-		if st, err := os.Stat(o.journal); err == nil && st.Size() > o.offset {
+		if o.durable() > o.offset {
 			return errors.New("no broker connection")
 		}
 		return nil
 	}
+	limit := o.durable()
 	err := evidence.ScanJournal(o.journal, o.offset, func(e evidence.JournalEntry) error {
+		if e.End > limit {
+			return errBeyondDurable
+		}
 		if e.JobID != "" {
 			if err := o.mq.Publish(o.topic(e.JobID), 1, false, e.Raw); err != nil {
 				return fmt.Errorf("seq %d: %w", e.Seq, err)
@@ -147,7 +169,7 @@ func (o *Outbox) Drain() error {
 		}
 		return nil
 	})
-	if errors.Is(err, evidence.ErrPartialLine) {
+	if errors.Is(err, evidence.ErrPartialLine) || errors.Is(err, errBeyondDurable) {
 		// The sealer is in the middle of a write, or the journal ends in a
 		// cut-off line. Either way there is nothing complete to publish.
 		return nil

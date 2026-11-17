@@ -5,8 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
+
+	"github.com/RainerGewalt/trailtransfer/internal/evidence"
 )
 
 // runningJob is what the worker keeps on disk about a job between its
@@ -92,34 +93,5 @@ func (s *stateStore) persist() error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(s.path, raw)
-}
-
-// writeFileAtomic writes data to a temporary file next to path, syncs it,
-// renames it over path and syncs the directory.
-func writeFileAtomic(path string, data []byte) error {
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	if d, err := os.Open(filepath.Dir(path)); err == nil {
-		_ = d.Sync()
-		d.Close()
-	}
-	return nil
+	return evidence.WriteFileAtomic(s.path, raw)
 }

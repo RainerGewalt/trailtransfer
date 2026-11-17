@@ -51,6 +51,10 @@ type Manager struct {
 	state    *stateStore
 	stopping bool
 	wg       sync.WaitGroup
+	// cancelRequested holds the running jobs a cancel command was sent for,
+	// so that a shutdown right after it does not turn the cancel into an
+	// interruption.
+	cancelRequested map[string]struct{}
 
 	// queue decouples the MQTT message callback from command handling, see
 	// Handle.
@@ -72,6 +76,8 @@ func NewManager(pol *policy.Policy, pub *events.Publisher, runner Runner, log *s
 		seen:    map[string]struct{}{},
 		outcome: map[string]string{},
 		queue:   make(chan []byte, commandQueueSize),
+
+		cancelRequested: map[string]struct{}{},
 	}
 	m.state, _ = openState("")
 	go m.dispatch()
@@ -397,6 +403,7 @@ func (m *Manager) run(c *commands.Command, cmdHash string, dryRun bool) {
 		cancel()
 		m.mu.Lock()
 		delete(m.active, c.JobID)
+		delete(m.cancelRequested, c.JobID)
 		m.running--
 		m.mu.Unlock()
 	}()
@@ -427,10 +434,17 @@ func (m *Manager) run(c *commands.Command, cmdHash string, dryRun bool) {
 
 	m.mu.Lock()
 	stopping := m.stopping
+	_, userCancel := m.cancelRequested[c.JobID]
 	m.mu.Unlock()
+	// A run that ended on its own keeps its outcome, also when the shutdown
+	// or a cancel arrived just after it: only a run that was cut short is
+	// cancelled or interrupted.
+	cutShort := out.Canceled || (runErr != nil && ctx.Err() != nil)
 	status := "completed"
 	switch {
-	case stopping && (out.Canceled || ctx.Err() != nil):
+	case cutShort && userCancel:
+		status = "cancelled"
+	case cutShort && stopping:
 		status = events.StatusInterrupted
 	case out.Canceled:
 		status = "cancelled"
@@ -508,6 +522,9 @@ func (m *Manager) handleCancel(c *commands.Command) {
 		m.pub.Status(c.JobID, "rejected", "no active job "+c.TargetJobID)
 		return
 	}
+	m.mu.Lock()
+	m.cancelRequested[c.TargetJobID] = struct{}{}
+	m.mu.Unlock()
 	m.pub.Log(c.TargetJobID, "INFO", "cancellation requested by "+c.JobID)
 	cancel()
 	m.pub.Status(c.JobID, "completed", "cancel signal sent to "+c.TargetJobID)

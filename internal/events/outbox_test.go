@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/RainerGewalt/trailtransfer/internal/config"
 	"github.com/RainerGewalt/trailtransfer/internal/evidence"
@@ -75,11 +76,23 @@ func openSealer(t *testing.T, path string) *evidence.Sealer {
 
 func openOutbox(t *testing.T, path string, b *broker) *Outbox {
 	t.Helper()
-	o, err := NewOutbox(path, b, testCfg.JobResultTopic, quiet)
+	o, err := NewOutbox(path, fileSize(path), b, testCfg.JobResultTopic, quiet)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return o
+}
+
+// fileSize stands in for Sealer.DurableSize where a test has no sealer for
+// the journal: everything in the file counts as synced.
+func fileSize(path string) func() int64 {
+	return func() int64 {
+		st, err := os.Stat(path)
+		if err != nil {
+			return 0
+		}
+		return st.Size()
+	}
 }
 
 func seal(t *testing.T, p *Publisher, jobID string) {
@@ -231,5 +244,100 @@ func TestExistingJournalWithoutCursorIsNotRepublished(t *testing.T) {
 	got := b.delivered()
 	if len(got) != before+1 || got[len(got)-1] != "tt/w/jobs/new/result|new" {
 		t.Fatalf("new record after the cursor: %v", got)
+	}
+}
+
+// The outbox publishes nothing beyond what the sealer has synced: a line that
+// is in the file but not confirmed (a write in progress, or a sync that
+// failed and was reported to the job as "not sealed") stays unpublished.
+func TestOutboxPublishesNothingBeyondTheSyncedJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "j.jsonl")
+	b := &broker{connected: true}
+	s := openSealer(t, path)
+	p := NewPublisher(b, testCfg, "test", s)
+	limit := int64(0)
+	o, err := NewOutbox(path, func() int64 { return limit }, b, testCfg.JobResultTopic, quiet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.SetOutbox(o)
+	seal(t, p, "a")
+	afterA := s.DurableSize()
+	seal(t, p, "b")
+	if s.DurableSize() <= afterA {
+		t.Fatal("DurableSize did not grow with a sealed record")
+	}
+
+	if err := o.Drain(); err != nil || len(b.delivered()) != 0 {
+		t.Fatalf("published beyond the synced journal: %v %v", b.delivered(), err)
+	}
+	limit = afterA
+	if err := o.Drain(); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.delivered(); !equal(got, []string{"tt/w/jobs/a/result|a"}) {
+		t.Fatalf("with a synced, b not: %v", got)
+	}
+	limit = s.DurableSize()
+	if err := o.Drain(); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.delivered(); len(got) != 2 {
+		t.Fatalf("after b was synced: %v", got)
+	}
+}
+
+// A cursor that points into the middle of a line (the journal was replaced
+// or edited while the worker was stopped) must not stall the outbox.
+func TestCursorInsideALineDoesNotStallTheOutbox(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "j.jsonl")
+	b := &broker{connected: true}
+	s := openSealer(t, path)
+	p := NewPublisher(b, testCfg, "test", s)
+	seal(t, p, "old")
+	before := len(b.delivered())
+	if err := os.WriteFile(path+".outbox", []byte(`{"offset":17,"seq":0}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	o := openOutbox(t, path, b)
+	p.SetOutbox(o)
+	seal(t, p, "new")
+	if err := o.Drain(); err != nil {
+		t.Fatalf("outbox stalled: %v", err)
+	}
+	got := b.delivered()
+	if len(got) != before+1 || got[len(got)-1] != "tt/w/jobs/new/result|new" {
+		t.Fatalf("after a cursor inside a line: %v", got)
+	}
+}
+
+// Without a journal there is no outbox. A result that ends during a broker
+// outage is still published once the broker is back, as long as the worker
+// runs.
+func TestResultWithoutJournalIsRetriedAfterAnOutage(t *testing.T) {
+	old := resultRetryInterval
+	resultRetryInterval = 5 * time.Millisecond
+	defer func() { resultRetryInterval = old }()
+
+	b := &broker{}
+	s, err := evidence.NewSealer(evidence.Options{ProducerID: "w"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := NewPublisher(b, testCfg, "test", s)
+	seal(t, p, "a")
+	if len(b.delivered()) != 0 {
+		t.Fatal("published without a broker")
+	}
+	b.set(true)
+	deadline := time.Now().Add(2 * time.Second)
+	for len(b.delivered()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the result was not published after the broker came back")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := b.delivered(); !equal(got, []string{"tt/w/jobs/a/result|a"}) {
+		t.Fatalf("published: %v", got)
 	}
 }

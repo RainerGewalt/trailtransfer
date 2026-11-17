@@ -88,7 +88,7 @@ func startProcess(t *testing.T, dir string, runner Runner) *process {
 	rec := &recorder{}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	pub := events.NewPublisher(rec, cfg, "test", sealer)
-	outbox, err := events.NewOutbox(journalPath(dir), rec, cfg.JobResultTopic, log)
+	outbox, err := events.NewOutbox(journalPath(dir), sealer.DurableSize, rec, cfg.JobResultTopic, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +112,17 @@ type journalRecord struct {
 	} `json:"payload"`
 }
 
+// readJournal reads the records of a journal nobody is writing to.
 func readJournal(t *testing.T, dir string) []journalRecord {
 	t.Helper()
+	out, err := scanJournal(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func scanJournal(dir string) ([]journalRecord, error) {
 	var out []journalRecord
 	err := evidence.ScanJournal(journalPath(dir), 0, func(e evidence.JournalEntry) error {
 		var r journalRecord
@@ -123,22 +132,21 @@ func readJournal(t *testing.T, dir string) []journalRecord {
 		out = append(out, r)
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
+	return out, err
 }
 
 func waitJournal(t *testing.T, dir string, n int) []journalRecord {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		recs := readJournal(t, dir)
-		if len(recs) >= n {
+		// A read can meet a line that is being written; that is not an
+		// error of the journal, so it is read again.
+		recs, err := scanJournal(dir)
+		if err == nil && len(recs) >= n {
 			return recs
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("journal has %d record(s), want %d", len(recs), n)
+			t.Fatalf("journal has %d record(s), want %d (last read: %v)", len(recs), n, err)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -408,5 +416,112 @@ func TestRecoverRefusesJournalWithPartialLastLine(t *testing.T) {
 	after, _ := os.ReadFile(journalPath(dir))
 	if string(before) != string(after) {
 		t.Fatal("the journal was changed")
+	}
+}
+
+// finishingRunner ends on its own with a clean exit, after the test has had
+// time to start the shutdown or send a cancel.
+type finishingRunner struct {
+	started chan struct{}
+	finish  chan struct{}
+}
+
+func (f *finishingRunner) Run(_ context.Context, _ *commands.Command, _ bool, _ func(rclone.Progress)) (rclone.Outcome, error) {
+	f.started <- struct{}{}
+	<-f.finish
+	return rclone.Outcome{FilesTotal: 1, FilesTransferred: 1, BytesTransferred: 10}, nil
+}
+
+// A transfer that ended on its own is completed, also when the shutdown
+// arrived just before its outcome was recorded.
+func TestJobThatFinishedDuringShutdownIsCompleted(t *testing.T) {
+	dir := t.TempDir()
+	r := &finishingRunner{started: make(chan struct{}, 1), finish: make(chan struct{})}
+	p := startProcess(t, dir, r)
+	p.mgr.Handle(cmdFor("job-fin"))
+	<-r.started
+	done := make(chan struct{})
+	go func() {
+		p.mgr.Shutdown(3 * time.Second)
+		close(done)
+	}()
+	// Shutdown has set stopping and cancelled the context; the run then
+	// ends with exit code 0.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		p.mgr.mu.Lock()
+		stopping := p.mgr.stopping
+		p.mgr.mu.Unlock()
+		if stopping {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Shutdown did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(r.finish)
+	<-done
+	recs := readJournal(t, dir)
+	if len(recs) != 1 || recs[0].EventType != events.EvidenceJobResult || recs[0].Payload.Status != "completed" {
+		t.Fatalf("want a completed result, got %+v", recs)
+	}
+}
+
+// lingeringRunner takes a moment to end after its context was cancelled, as
+// rclone does, so that a shutdown can arrive between a cancel and its effect.
+type lingeringRunner struct {
+	started chan struct{}
+	allow   chan struct{}
+}
+
+func (l *lingeringRunner) Run(ctx context.Context, _ *commands.Command, _ bool, _ func(rclone.Progress)) (rclone.Outcome, error) {
+	l.started <- struct{}{}
+	<-ctx.Done()
+	<-l.allow
+	return rclone.Outcome{Canceled: true, ExitCode: -1}, ctx.Err()
+}
+
+func waitFor(t *testing.T, what string, cond func(m *Manager) bool, m *Manager) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		m.mu.Lock()
+		ok := cond(m)
+		m.mu.Unlock()
+		if ok {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timeout: %s", what)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// A cancel that the user sent stays a cancel when the worker is stopped
+// before the job has ended.
+func TestCancelBeforeShutdownStaysCancelled(t *testing.T) {
+	dir := t.TempDir()
+	r := &lingeringRunner{started: make(chan struct{}, 1), allow: make(chan struct{})}
+	p := startProcess(t, dir, r)
+	p.mgr.Handle(cmdFor("job-cs"))
+	<-r.started
+	p.mgr.Handle([]byte(`{"job_id":"c-2","action":"cancel","target_job_id":"job-cs"}`))
+	waitFor(t, "the cancel command was handled", func(m *Manager) bool {
+		_, ok := m.cancelRequested["job-cs"]
+		return ok
+	}, p.mgr)
+	done := make(chan struct{})
+	go func() {
+		p.mgr.Shutdown(3 * time.Second)
+		close(done)
+	}()
+	waitFor(t, "Shutdown started", func(m *Manager) bool { return m.stopping }, p.mgr)
+	close(r.allow)
+	<-done
+	recs := readJournal(t, dir)
+	if len(recs) != 1 || recs[0].EventType != events.EvidenceJobResult || recs[0].Payload.Status != "cancelled" {
+		t.Fatalf("want a cancelled result, got %+v", recs)
 	}
 }

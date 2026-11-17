@@ -199,8 +199,11 @@ duplicate or capacity denial        -> rejected result
 admitted command                    -> accepted -> started -> terminal result
 ```
 
-The terminal transfer status is `completed`, `failed`, `cancelled`, or
-`rejected`. Progress samples are emitted while rclone reports statistics.
+The terminal transfer status is `completed`, `failed`, `cancelled`,
+`interrupted` or `rejected`. A run that ended on its own keeps its outcome
+even if a cancel or the shutdown arrived a moment later; a cancel the sender
+asked for stays `cancelled` when the worker is stopped before rclone has
+ended. Progress samples are emitted while rclone reports statistics.
 
 `cancel` looks up an active target job and cancels its context. `status`
 answers on the query's own topic with the target job's last known status
@@ -296,7 +299,8 @@ chain, the job IDs and the outcomes are in memory and end with the process.
 **Order before a transfer.** A command is decoded, checked by the policy and
 admitted. The job is then written to the state file `<journal>.jobs`
 (temporary file, `fsync`, rename, `fsync` of the directory), and only after
-that write has succeeded does the worker start rclone. If the state cannot
+that write has succeeded, including the sync of the directory, does the
+worker start rclone. If the state cannot
 be written, the job is refused as `state_unavailable` and rclone does not
 run. There is no moment at which rclone runs for a job the disk does not
 know. The reverse can happen: a worker that dies after the write and before
@@ -330,15 +334,19 @@ its rclone still writes. On other systems a killed worker can leave rclone
 running.
 
 **Publishing.** Sealed records are published from the journal, in journal
-order, by an outbox that keeps its position in `<journal>.outbox`. The
-position moves only past records the broker has confirmed. A record sealed
+order, by an outbox that keeps its position in `<journal>.outbox` (written
+and synced like the job state). It publishes only records the sealer has
+written and synced, never a line whose write is in progress or whose sync
+failed, and its position moves only past records the broker has confirmed. A record sealed
 while the broker is away, or shortly before the worker stops, is published
 after the next connection, also by a later process. Delivery is at least
 once: a record can arrive twice, as the same bytes with the same `seq` and
 `chain_hash`, and consumers deduplicate on those. A worker that gets an
-outbox for the first time, or whose position file is missing or does not
-fit the journal, starts at the end of the journal and does not publish its
-history again. Status, progress and log messages are not queued: without a
+outbox for the first time, or whose position file is missing, unreadable,
+beyond the end of the journal or not at the start of a line, starts at the
+end of the journal and does not publish its history again; records that
+were waiting at that moment are then not published, and the worker logs an
+error. Status, progress and log messages are not queued: without a
 connection they are dropped, because they describe a moment that has passed.
 
 **What this does not cover.**
@@ -356,9 +364,18 @@ connection they are dropped, because they describe a moment that has passed.
 - The journal is read completely at every start, and the set of known
   `job_id`s grows with it. Rotating the journal away also removes its
   `job_id`s from the duplicate check.
-- One worker process per journal. On Linux and macOS a second worker on
-  the same journal does not start (`<journal>.lock`); on Windows two
-  processes on the same files are not detected.
+- One worker process per journal. On Linux, macOS and the BSDs a second
+  worker on the same journal does not start (`<journal>.lock`); on other
+  systems, Windows among them, two processes on the same files are not
+  detected.
+- Without `evidence_journal` a result that ends during a broker outage is
+  tried again every 2 s for up to 30 minutes while the worker runs, and is
+  lost if the worker stops first.
+- Records are published under the topic of the current `worker_id`. A
+  journal that is continued under another `worker_id` publishes its waiting
+  records there.
+- A power loss was not tested. The order of writes and syncs above is what
+  the code does; what a given disk or file system keeps is outside it.
 - The answer to a repeated `job_id` is a new `transfer.job.rejected` record
   that names the stored status. The stored record itself is not published
   again; it is in the journal under the same `job_id`.

@@ -156,7 +156,7 @@ func cmdRun(args []string) {
 	// "Restart and recovery").
 	var outbox *events.Outbox
 	if sealer.JournalEnabled() {
-		outbox, err = events.NewOutbox(cfg.EvidenceJournal, client, cfg.JobResultTopic, log)
+		outbox, err = events.NewOutbox(cfg.EvidenceJournal, sealer.DurableSize, client, cfg.JobResultTopic, log)
 		if err != nil {
 			fatal(fmt.Errorf("outbox: %w", err))
 		}

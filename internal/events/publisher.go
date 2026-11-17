@@ -2,6 +2,7 @@ package events
 
 import (
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	"github.com/RainerGewalt/trailtransfer/internal/config"
@@ -107,8 +108,32 @@ func (p *Publisher) Result(r ResultEvent, actor *evidence.Actor) error {
 		p.outbox.Notify()
 		return nil
 	}
-	_ = p.mq.Publish(p.cfg.JobResultTopic(r.JobID), 1, false, rec)
+	// No journal, so no outbox: the record exists only in this process.
+	// Keep trying while the broker is away, so that an outage does not
+	// lose it as long as the worker runs.
+	topic := p.cfg.JobResultTopic(r.JobID)
+	if err := p.mq.Publish(topic, 1, false, rec); err != nil {
+		go p.retryResult(topic, r.JobID, rec)
+	}
 	return nil
+}
+
+// resultRetryInterval and resultRetryFor bound the retries of a result that
+// has no journal behind it.
+var (
+	resultRetryInterval = 2 * time.Second
+	resultRetryFor      = 30 * time.Minute
+)
+
+func (p *Publisher) retryResult(topic, jobID string, rec []byte) {
+	deadline := time.Now().Add(resultRetryFor)
+	for time.Now().Before(deadline) {
+		time.Sleep(resultRetryInterval)
+		if p.mq.Publish(topic, 1, false, rec) == nil {
+			return
+		}
+	}
+	slog.Error("result not published: no broker confirmation, and without evidence_journal the record is not kept", "job_id", jobID, "tried_for", resultRetryFor.String())
 }
 
 // EvidenceErr returns the journal write error that stopped sealing, or nil.

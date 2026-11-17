@@ -26,8 +26,10 @@ below needs `evidence_journal`.
   connection is back, also when the worker restarts in between. Records are
   published from the journal in journal order, at least once.
 - On Linux rclone ends with the worker, also when the worker is killed.
-- A second worker on the same journal no longer starts (Linux and macOS):
+- A second worker on the same journal no longer starts (Linux, macOS, BSD):
   two processes appending to one journal would break its chain.
+- A new journal is durable from its first record: its directory entry is
+  synced when the journal is created.
 - The worker stops within seconds when the broker is away; a status message
   no longer holds a job or the shutdown for the length of the outage.
 
@@ -41,7 +43,8 @@ below needs `evidence_journal`.
   `<journal>.outbox` (publishing position) and `<journal>.lock`. On the first start with this
   version the records already in the journal are not published again.
 - Status, progress and log messages are no longer queued by the MQTT client
-  while the broker is away; sealed records are.
+  while the broker is away; sealed records are published from the journal,
+  and without a journal a result is tried again for up to 30 minutes.
 - A journal that ends in an incomplete line stops the worker at the start,
   as before, now also when the incomplete line happens to be valid JSON
   without a line ending.
