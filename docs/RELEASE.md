@@ -31,10 +31,28 @@ TrailTransfer releases are driven by annotated Git tags of the form `vMAJOR.MINO
    git push origin v0.3.0
    ```
 
-6. Pushing the tag triggers `.github/workflows/docker.yml`, which builds a
-   multi-arch (`linux/amd64`, `linux/arm64`) image and pushes it to
-   `ghcr.io/rainergewalt/trailtransfer`, tagged with the version without `v`
-   (`0.3.0`) and `latest`; the binary in it reports that same version.
+6. Pushing the tag triggers `.github/workflows/docker.yml`. It first runs
+   the CI gate on the tagged commit and builds nothing if that fails. Then
+   it builds a multi-arch (`linux/amd64`, `linux/arm64`) image and pushes it
+   to `ghcr.io/rainergewalt/trailtransfer`, tagged with the version without
+   `v` (`0.3.0`) and `latest`; the binary in it reports that same version.
+   If the workflow cannot run, the same image is built and pushed with
+   `docker buildx build --platform linux/amd64,linux/arm64 --build-arg
+   VERSION=X.Y.Z --push` after `make lint test` passed on the tagged commit.
+7. Put the index digest of the image into the release notes, as
+   `ghcr.io/rainergewalt/trailtransfer@sha256:…`. The workflow prints it in
+   its summary; `docker buildx imagetools inspect
+   ghcr.io/rainergewalt/trailtransfer:X.Y.Z` shows it as well. A tag can be
+   moved later, a digest cannot.
+
+## Pinned base images
+
+`Dockerfile` and `docker-compose.yaml` name every base image by tag and
+index digest. The digest decides what is pulled; the tag only says what it
+is. Dependabot (`.github/dependabot.yml`) proposes updates for the digests,
+the Go modules and the GitHub Actions as pull requests; none is merged
+automatically. After a digest change, run `make first-use` before merging:
+a new Go patch release or rclone build is a change to the shipped image.
 
 ## Release checklist
 
@@ -45,7 +63,8 @@ TrailTransfer releases are driven by annotated Git tags of the form `vMAJOR.MINO
 - [ ] Migration notes updated if behavior changed
 - [ ] Security review of the diff since the last tag
 - [ ] Demo verified (`make demo` + `make verify-demo`)
-- [ ] Tag pushed; GHCR image built
+- [ ] Tag pushed; GHCR image built from a commit that passed the gate
+- [ ] Image index digest in the release notes
 
 ## Planned hardening (not yet automated)
 
@@ -59,4 +78,6 @@ of the pipeline yet — do not claim them until the workflow implements them:
 - Container image signing (cosign) and image scanning (Trivy/Grype).
 - `govulncheck` and a linter (`staticcheck` / `golangci-lint`) as required CI
   gates.
-- Pinned action SHAs and a documented rclone-version compatibility matrix.
+- Action SHAs pinned (base images are pinned by digest; actions are still
+  referenced by major version) and a documented rclone-version compatibility
+  matrix.

@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -86,6 +87,9 @@ func cmdRun(args []string) {
 		fatal(err)
 	}
 	log := logging.Setup(cfg.LogLevel)
+	for _, w := range cfg.Warnings {
+		log.Warn(w)
+	}
 	log.Info("starting TrailTransfer", "worker_id", cfg.WorkerID, "version", version.String(), "policy_version", pol.PolicyVersion)
 
 	runner := &rclone.Runner{
@@ -377,13 +381,52 @@ func cmdKeygen(args []string) {
 	if err != nil {
 		fatal(err)
 	}
-	if err := os.WriteFile(*out+".key", priv, 0o600); err != nil {
-		fatal(err)
-	}
-	if err := os.WriteFile(*out+".pub", pub, 0o644); err != nil {
+	if err := createKeyPair(*out, priv, pub); err != nil {
 		fatal(err)
 	}
 	fmt.Printf("wrote %s.key (private, keep secret) and %s.pub\nkey_id: %s\n", *out, *out, keyID)
+}
+
+// createKeyPair writes <out>.key and <out>.pub and refuses to replace either:
+// a second keygen in the same directory used to destroy the private key that
+// earlier journals were signed with. Both names are checked before anything
+// is written, and the files are created exclusively, so a file that appears
+// in between is not overwritten either.
+func createKeyPair(out string, priv, pub []byte) error {
+	keyPath, pubPath := out+".key", out+".pub"
+	for _, p := range []string{keyPath, pubPath} {
+		if _, err := os.Lstat(p); err == nil {
+			return fmt.Errorf("%s already exists; keygen does not overwrite keys. Choose another --out or move the existing pair away", p)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if err := writeNew(keyPath, priv, 0o600); err != nil {
+		return err
+	}
+	if err := writeNew(pubPath, pub, 0o644); err != nil {
+		_ = os.Remove(keyPath)
+		return err
+	}
+	return nil
+}
+
+func writeNew(path string, data []byte, mode os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	return f.Close()
 }
 
 func parseConfigFlag(name string, args []string) string {

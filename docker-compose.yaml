@@ -37,14 +37,15 @@ services:
   # records are kept. A real deployment mounts a directory owned by the
   # worker's user instead.
   evidence-init:
-    image: rclone/rclone:1.68
+    image: rclone/rclone:1.68@sha256:74c51b8817e5431bd6d7ed27cb2a50d8ee78d77f6807b72a41ef6f898845942b
     entrypoint: ["sh", "-c", "touch /data/evidence/journal.jsonl && chmod 0777 /data/evidence && chmod 0666 /data/evidence/journal.jsonl"]
     volumes:
       - ./evidence:/data/evidence
 
   mqtt:
-    image: eclipse-mosquitto:2
-    ports: ["${MQTT_PORT:-1883}:1883"]
+    image: eclipse-mosquitto:2@sha256:fa12172a051310efe5bcb7a6a11b77bd5faacb82cbacd7742aa758bf024fd8e4
+    # Bound to this machine only: the demo broker accepts anonymous clients.
+    ports: ["127.0.0.1:${MQTT_PORT:-1883}:1883"]
     volumes:
       - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
@@ -52,9 +53,10 @@ services:
   # release the worker uses. Buckets are top-level directories under /data;
   # rclone creates the demo bucket on the first copy.
   s3:
-    image: rclone/rclone:1.68
+    image: rclone/rclone:1.68@sha256:74c51b8817e5431bd6d7ed27cb2a50d8ee78d77f6807b72a41ef6f898845942b
     command: ["serve", "s3", "/data", "--addr", ":9000", "--auth-key", "demo,demo-secret-12345"]
-    ports: ["${S3_PORT:-9000}:9000"]
+    # Bound to this machine only: the demo credentials are public.
+    ports: ["127.0.0.1:${S3_PORT:-9000}:9000"]
     volumes:
       - s3-data:/data
 

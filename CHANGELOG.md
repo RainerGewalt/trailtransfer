@@ -10,6 +10,18 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 Restart safety (#1). No new commands and no new configuration; everything
 below needs `evidence_journal`.
 
+### Security
+
+- **`keygen` no longer overwrites a key pair.** A second `trailtransfer
+  keygen` with the same `--out` replaced `<name>.key` and `<name>.pub`
+  without a word, and with them the key that earlier journals were signed
+  with. It now stops with exit code 1 if either file exists and writes
+  nothing; the files are created exclusively.
+- **The demo ports are published on `127.0.0.1` only.** `docker compose up`
+  used to publish the anonymous demo broker and the S3 target with its
+  printed demo credentials on all interfaces, so anyone on the same network
+  could send commands to the demo worker.
+
 ### Fixed
 
 - A command that is delivered again after a restart no longer runs a second
@@ -48,6 +60,22 @@ below needs `evidence_journal`.
 - A journal that ends in an incomplete line stops the worker at the start,
   as before, now also when the incomplete line happens to be valid JSON
   without a line ending.
+- **`max_parallel_jobs` in the worker configuration is reported as unused.**
+  The key and `TRAILTRANSFER_MAX_PARALLEL_JOBS` never had an effect; the
+  limit has always been `max_parallel_jobs` in the policy file. Existing
+  files keep loading, and the worker logs a warning at start. Remove the
+  key or the variable; a later release will refuse it like any other
+  unknown key. The examples no longer carry it.
+- Base images in `Dockerfile` and `docker-compose.yaml` are pinned by index
+  digest in addition to the tag. The image carries a description, source
+  and licence label.
+- `golang.org/x/net` 0.44.0 → 0.63.0 and `golang.org/x/sync` 0.17.0 →
+  0.25.0 (indirect, through the MQTT client). `govulncheck` reports no
+  finding with the updated modules.
+- The image workflow runs the CI gate on the tagged commit first and builds
+  no image if it fails; it prints the image digest for the release notes.
+  Dependabot proposes updates for Go modules, GitHub Actions and image
+  digests (`docs/RELEASE.md`).
 
 ### Not changed
 
@@ -55,6 +83,7 @@ below needs `evidence_journal`.
   (#2). The answer to a repeated `job_id` is a rejection that names the
   stored status, not the stored record again. Attempt identifiers are not
   introduced, because a `job_id` is executed at most once.
+
 
 ## [0.1.2] - 2026-11-12
 

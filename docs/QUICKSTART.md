@@ -13,6 +13,12 @@ This starts the worker, a Mosquitto broker and an S3 target (rclone's own S3
 server, `rclone serve s3`), after a one-shot step that prepares
 `./evidence/journal.jsonl` so the worker can append to it and you can read it.
 
+The broker accepts anonymous clients and the S3 target uses credentials that
+are printed in this repository. Both ports are therefore published on
+`127.0.0.1` only: the demo is reachable from this machine, not from the
+network. Do not change that binding to try the demo from another host; give
+the broker authentication first.
+
 ## 2. Watch what the worker publishes
 
 In a second terminal:

@@ -6,6 +6,9 @@ on:
     tags: ["v*.*.*"]
   pull_request:
     branches: [main]
+  # Called by docker.yml, so that an image is only built from a commit that
+  # passed this gate.
+  workflow_call:
 
 permissions:
   contents: read
