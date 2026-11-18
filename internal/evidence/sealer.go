@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -48,6 +49,10 @@ type Sealer struct {
 	signer         *Signer
 	now            func() time.Time
 
+	// durable is the journal length up to which records are known to be
+	// written and synced. The outbox publishes nothing beyond it.
+	durable int64
+
 	// failed is the first journal write error. After it the journal may end
 	// in a partial line and no longer match the in-memory chain, so every
 	// later Seal fails with it until the process restarts.
@@ -84,6 +89,18 @@ func NewSealer(opts Options) (*Sealer, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A journal that was just created exists after a power loss only once
+	// its directory entry is synced.
+	if err := SyncDir(filepath.Dir(opts.JournalPath)); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("sync directory of %s: %w", opts.JournalPath, err)
+	}
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	s.durable = st.Size()
 	s.journal = f
 	return s, nil
 }
@@ -141,6 +158,15 @@ func (s *Sealer) Signed() bool {
 
 // JournalEnabled reports whether records are persisted durably.
 func (s *Sealer) JournalEnabled() bool { return s.journal != nil }
+
+// DurableSize is the length of the journal up to which every record is
+// written and synced. A line beyond it may be a write in progress or one
+// whose sync failed; it is not published in this process.
+func (s *Sealer) DurableSize() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.durable
+}
 
 // Err returns the journal write error that stopped the sealer, or nil.
 func (s *Sealer) Err() error {
@@ -206,7 +232,13 @@ func (s *Sealer) Seal(eventType, jobID string, payload any, actor *Actor) (json.
 		return nil, err
 	}
 	if s.journal != nil {
-		if _, err := s.journal.Write(append(out, '\n')); err != nil {
+		line := append(out, '\n')
+		defer func() {
+			if s.failed == nil {
+				s.durable += int64(len(line))
+			}
+		}()
+		if _, err := s.journal.Write(line); err != nil {
 			s.failed = fmt.Errorf("write %s: %w", s.journal.Name(), err)
 			return nil, s.failed
 		}

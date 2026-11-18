@@ -12,11 +12,29 @@ const (
 )
 
 // Evidence event types in the Trail Evidence Record v1 namespace. Only
-// terminal results are sealed: a job that ran ends in transfer.job.result, a
-// job that was turned away before running ends in transfer.job.rejected.
+// terminal results are sealed: a job that ran to its end is
+// transfer.job.result, a job that was turned away before running is
+// transfer.job.rejected, and a job that the worker stopped under, or that
+// was running when the worker died, is transfer.job.interrupted.
 const (
-	EvidenceJobResult   = "transfer.job.result"
-	EvidenceJobRejected = "transfer.job.rejected"
+	EvidenceJobResult      = "transfer.job.result"
+	EvidenceJobRejected    = "transfer.job.rejected"
+	EvidenceJobInterrupted = "transfer.job.interrupted"
+)
+
+// StatusInterrupted is the status of a job whose run the worker did not see
+// to its end. How much rclone transferred is not known from the record.
+const StatusInterrupted = "interrupted"
+
+// Reasons of an interrupted job.
+const (
+	// ReasonWorkerShutdown: the worker was asked to stop (SIGTERM or
+	// SIGINT), ended rclone and sealed the record before it exited.
+	ReasonWorkerShutdown = "worker_shutdown"
+	// ReasonWorkerRestart: the job was running when the worker stopped
+	// without sealing an outcome (crash, kill, power loss). The record is
+	// sealed by the next start.
+	ReasonWorkerRestart = "worker_restart"
 )
 
 // StatusEvent marks a job lifecycle transition.

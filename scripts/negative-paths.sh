@@ -7,7 +7,10 @@
 # outside the allowed path, a source behind a symbolic link, a job_id that is
 # not a valid MQTT topic level, a dry run, a file over the size limit, move
 # without allow_delete, a status query after a failed job, a journal that
-# cannot be written, and a policy with a typo.
+# cannot be written, a policy with a typo, and the restart cases of issue #1:
+# a worker killed during a transfer, a worker stopped during a transfer, and
+# a result sealed while the broker is away and the worker restarts, and a
+# second worker on the same journal.
 #
 #   make negative-paths                         builds the working tree
 #   TT=/path/to/trailtransfer make negative-paths   checks another binary
@@ -125,7 +128,7 @@ start_worker() {
 			TRAILTRANSFER_MQTT_PORT="$PORT" \
 			TRAILTRANSFER_POLICY_FILE="$work/$id/policy.yaml" \
 			TRAILTRANSFER_RCLONE_CONFIG="$work/rclone.conf" \
-			TRAILTRANSFER_RCLONE_BINARY="$RCLONE" \
+			TRAILTRANSFER_RCLONE_BINARY="${WORKER_RCLONE:-$RCLONE}" \
 			TRAILTRANSFER_EVIDENCE_JOURNAL="$work/$id/journal.jsonl" \
 			TRAILTRANSFER_HEALTH_INTERVAL_SECONDS=1
 		[[ -n $limit ]] && ulimit -f "$limit"
@@ -425,6 +428,196 @@ for f in typo actions; do
 		fail "$f.yaml: exit $code, $out"
 	fi
 done
+
+# ---------------------------------------------------------------------------
+# Restart cases (issue #1). A transfer that is still running when the worker
+# stops is played by a stand-in for rclone that records its PID and waits.
+printf '#!/bin/sh\necho $$ >"%s/slow-rclone.pid"\nexec sleep 60\n' "$work" >"$work/slow-rclone"
+printf '#!/bin/sh\nsleep 3\nexit 0\n' >"$work/brief-rclone"
+chmod +x "$work/slow-rclone" "$work/brief-rclone"
+copy_job() { printf '{"job_id":"%s","action":"copy","source":"%s/src","target":"archive:incoming","filters":["a.png"],"dry_run":false}' "$1" "$work"; }
+journal_count() { grep -c "\"job_id\":\"$2\"" "$work/$1/journal.jsonl" 2>/dev/null || true; }
+
+check "R1: a worker killed during a transfer leaves exactly one interrupted record and does not run the job again"
+rm -f "$work/slow-rclone.pid"
+WORKER_RCLONE="$work/slow-rclone" start_worker neg-r1
+send neg-r1 "$(copy_job r1-1)"
+wait_for "$mqtt_log" '^trailtransfer/neg-r1/jobs/r1-1/status .*"status":"started"' || die "setup: r1-1 did not start"
+wait_for "$work/slow-rclone.pid" '^[0-9]+$' || die "setup: the rclone stand-in did not start"
+child="$(cat "$work/slow-rclone.pid")"
+kill -9 "$worker_pid" 2>/dev/null
+wait "$worker_pid" 2>/dev/null
+worker_pid=""
+if [[ $(journal_count neg-r1 r1-1) == 0 ]]; then
+	pass "the killed worker left no record for r1-1"
+else
+	fail "the killed worker left $(journal_count neg-r1 r1-1) record(s) for r1-1"
+fi
+gone=1
+for ((i = 0; i < 25; i++)); do
+	kill -0 "$child" 2>/dev/null || {
+		gone=0
+		break
+	}
+	sleep 0.2
+done
+if [[ $gone == 0 ]]; then
+	pass "the transfer process (pid $child) ended with the worker"
+elif [[ $(uname -s) == Linux ]]; then
+	fail "the transfer process (pid $child) outlived the worker"
+	kill -9 "$child" 2>/dev/null
+else
+	note "the transfer process outlived the worker; it is bound to the worker on Linux only"
+	kill -9 "$child" 2>/dev/null
+fi
+start_worker neg-r1
+if wait_for "$mqtt_log" '^trailtransfer/neg-r1/jobs/r1-1/result .*"event_type":"transfer.job.interrupted"'; then
+	line="$(topic_lines neg-r1 r1-1 result | grep 'transfer.job.interrupted' | head -n 1)"
+	if grep -q '"status":"interrupted"' <<<"$line" && grep -q '"reason":"worker_restart"' <<<"$line"; then
+		pass "the next start sealed and published transfer.job.interrupted with reason worker_restart"
+	else
+		fail "unexpected interrupted record: $(cut -c1-200 <<<"$line")"
+	fi
+else
+	fail "no transfer.job.interrupted for r1-1 within ${WAIT}s after the restart"
+fi
+send neg-r1 "$(copy_job r1-1)"
+if wait_for "$mqtt_log" '^trailtransfer/neg-r1/jobs/r1-1/result .*"reason":"duplicate_job_id"'; then
+	started="$(topic_lines neg-r1 r1-1 status | grep -c '"status":"started"')"
+	detail="$(topic_lines neg-r1 r1-1 result | grep duplicate_job_id | head -n 1 | grep -o '"detail":"[^"]*"')"
+	if [[ $started == 1 ]] && grep -q 'last status: interrupted' <<<"$detail"; then
+		pass "the redelivered command was refused and not started again: $detail"
+	else
+		fail "redelivered command: started $started time(s), $detail"
+	fi
+else
+	fail "the redelivered command was not answered as a duplicate within ${WAIT}s"
+fi
+stop_worker || note "worker did not stop within 5 s after SIGTERM"
+start_worker neg-r1
+stop_worker || note "worker did not stop within 5 s after SIGTERM"
+n="$(grep -c '"event_type":"transfer.job.interrupted"' "$work/neg-r1/journal.jsonl")"
+if [[ $n == 1 ]]; then
+	pass "after two more starts the journal still holds exactly one interrupted record"
+else
+	fail "the journal holds $n interrupted records"
+fi
+if "$TT" verify "$work/neg-r1/journal.jsonl" >"$work/neg-r1/verify.txt" 2>&1; then
+	pass "the journal verifies: $(head -n 1 "$work/neg-r1/verify.txt")"
+else
+	fail "the journal does not verify: $(head -n 3 "$work/neg-r1/verify.txt" | tr '\n' ' ')"
+fi
+
+# ---------------------------------------------------------------------------
+check "R2: SIGTERM during a transfer ends it and seals the job as interrupted before the worker exits"
+rm -f "$work/slow-rclone.pid"
+WORKER_RCLONE="$work/slow-rclone" start_worker neg-r2
+send neg-r2 "$(copy_job r2-1)"
+wait_for "$mqtt_log" '^trailtransfer/neg-r2/jobs/r2-1/status .*"status":"started"' || die "setup: r2-1 did not start"
+wait_for "$work/slow-rclone.pid" '^[0-9]+$' || die "setup: the rclone stand-in did not start"
+child="$(cat "$work/slow-rclone.pid")"
+if stop_worker; then
+	pass "the worker stopped within 5 s after SIGTERM"
+else
+	fail "the worker did not stop within 5 s after SIGTERM"
+fi
+if kill -0 "$child" 2>/dev/null; then
+	fail "the transfer process (pid $child) is still running"
+	kill -9 "$child" 2>/dev/null
+else
+	pass "the transfer process was ended"
+fi
+line="$(grep '"job_id":"r2-1"' "$work/neg-r2/journal.jsonl" | head -n 1)"
+if [[ $(journal_count neg-r2 r2-1) == 1 ]] && grep -q '"event_type":"transfer.job.interrupted"' <<<"$line" && grep -q '"reason":"worker_shutdown"' <<<"$line"; then
+	pass "the journal holds one transfer.job.interrupted with reason worker_shutdown"
+else
+	fail "journal for r2-1: $(journal_count neg-r2 r2-1) record(s), $(cut -c1-200 <<<"$line")"
+fi
+if wait_for "$mqtt_log" '^trailtransfer/neg-r2/jobs/r2-1/result .*"reason":"worker_shutdown"'; then
+	pass "the record was published before the worker exited"
+else
+	fail "the record was not published"
+fi
+start_worker neg-r2
+stop_worker || note "worker did not stop within 5 s after SIGTERM"
+if [[ $(journal_count neg-r2 r2-1) == 1 ]] && "$TT" verify "$work/neg-r2/journal.jsonl" >"$work/neg-r2/verify.txt" 2>&1; then
+	pass "the next start adds nothing for r2-1 and the journal verifies: $(head -n 1 "$work/neg-r2/verify.txt")"
+else
+	fail "after the next start: $(journal_count neg-r2 r2-1) record(s) for r2-1, $(head -n 2 "$work/neg-r2/verify.txt" 2>/dev/null | tr '\n' ' ')"
+fi
+
+# ---------------------------------------------------------------------------
+check "R3: a result sealed while the broker is away is published after a restart of the worker"
+WORKER_RCLONE="$work/brief-rclone" start_worker neg-r3
+send neg-r3 "$(copy_job r3-1)"
+wait_for "$mqtt_log" '^trailtransfer/neg-r3/jobs/r3-1/status .*"status":"started"' || die "setup: r3-1 did not start"
+kill "$sub_pid" 2>/dev/null
+kill "$broker_pid" 2>/dev/null
+wait "$broker_pid" 2>/dev/null
+broker_pid=""
+if wait_for "$work/neg-r3/journal.jsonl" '"job_id":"r3-1"'; then
+	pass "the outcome was sealed while the broker was away: $(grep -o '"status":"[a-z]*"' "$work/neg-r3/journal.jsonl" | tail -n 1)"
+else
+	fail "no record for r3-1 in the journal within ${WAIT}s"
+fi
+if topic_lines neg-r3 r3-1 result | grep -q .; then
+	fail "a result for r3-1 was published before the broker went away; the check proves nothing"
+fi
+if stop_worker; then
+	pass "the worker stopped within 5 s after SIGTERM although the broker was away"
+else
+	fail "the worker did not stop within 5 s after SIGTERM while the broker was away"
+fi
+"$MOSQUITTO" -c "$work/mosquitto.conf" >>"$broker_log" 2>&1 &
+broker_pid=$!
+for ((i = 0; i < WAIT * 5; i++)); do
+	port_in_use "$PORT" && break
+	sleep 0.2
+done
+port_in_use "$PORT" || die "mosquitto did not come back on $PORT"
+mosquitto_sub -h 127.0.0.1 -p "$PORT" -v -t 'trailtransfer/#' >>"$mqtt_log" 2>&1 &
+sub_pid=$!
+for ((i = 0; i < WAIT * 5; i++)); do
+	mosquitto_pub -h 127.0.0.1 -p "$PORT" -t trailtransfer/probe -m back
+	grep -q '^trailtransfer/probe back' "$mqtt_log" && break
+	sleep 0.2
+done
+start_worker neg-r3
+if wait_topic neg-r3 r3-1 result; then
+	n="$(topic_lines neg-r3 r3-1 result | grep -c '"event_type":"transfer.job.result"')"
+	pass "the new worker published the sealed result of r3-1 ($n message(s))"
+else
+	fail "the result of r3-1 was not published within ${WAIT}s after broker and worker were back"
+fi
+stop_worker || note "worker did not stop within 5 s after SIGTERM"
+if [[ $(journal_count neg-r3 r3-1) == 1 ]] && "$TT" verify "$work/neg-r3/journal.jsonl" >"$work/neg-r3/verify.txt" 2>&1; then
+	pass "the journal holds one record for r3-1 and verifies: $(head -n 1 "$work/neg-r3/verify.txt")"
+else
+	fail "journal for r3-1: $(journal_count neg-r3 r3-1) record(s), $(head -n 2 "$work/neg-r3/verify.txt" 2>/dev/null | tr '\n' ' ')"
+fi
+
+# ---------------------------------------------------------------------------
+check "R4: a second worker on the same journal does not start"
+start_worker neg-r4
+out="$(TRAILTRANSFER_WORKER_ID=neg-r4 TRAILTRANSFER_MQTT_HOST=127.0.0.1 TRAILTRANSFER_MQTT_PORT="$PORT" \
+	TRAILTRANSFER_POLICY_FILE="$work/neg-r4/policy.yaml" TRAILTRANSFER_RCLONE_CONFIG="$work/rclone.conf" \
+	TRAILTRANSFER_RCLONE_BINARY="$RCLONE" TRAILTRANSFER_EVIDENCE_JOURNAL="$work/neg-r4/journal.jsonl" \
+	timeout 10 "$TT" run 2>&1)"
+code=$?
+if [[ $code == 1 ]] && grep -q 'in use by another worker' <<<"$out"; then
+	pass "exit 1: $(tail -n 1 <<<"$out" | cut -c1-160)"
+elif [[ $(uname -s) != Linux && $(uname -s) != Darwin ]]; then
+	note "not enforced on this system (exit $code)"
+else
+	fail "the second worker ran (exit $code): $(tail -n 1 <<<"$out" | cut -c1-160)"
+fi
+send neg-r4 "$(copy_job r4-1)"
+if wait_topic neg-r4 r4-1 result; then
+	pass "the first worker keeps working"
+else
+	fail "the first worker no longer answers"
+fi
+stop_worker || note "worker did not stop within 5 s after SIGTERM"
 
 # ---------------------------------------------------------------------------
 printf '\nNEGATIVE PATHS: %d passed, %d failed (binary %s)\n' "$passed" "$failed" "$("$TT" version)"
