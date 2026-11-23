@@ -45,16 +45,21 @@ type Config struct {
 	// is signed with it. Empty = unsigned chain.
 	SigningKey string `yaml:"signing_key"`
 
-	MaxParallelJobs       int    `yaml:"max_parallel_jobs"`
-	HealthIntervalSeconds int    `yaml:"health_interval_seconds"`
-	LogLevel              string `yaml:"log_level"`
+	// DeprecatedMaxParallelJobs is read so that existing files keep loading,
+	// and never used: the bound is the policy's max_parallel_jobs.
+	DeprecatedMaxParallelJobs *int   `yaml:"max_parallel_jobs"`
+	HealthIntervalSeconds     int    `yaml:"health_interval_seconds"`
+	LogLevel                  string `yaml:"log_level"`
+
+	// Warnings lists settings that were read and have no effect. The worker
+	// logs them at start.
+	Warnings []string `yaml:"-"`
 }
 
 func defaults() *Config {
 	c := &Config{
 		TopicPrefix:           "trailtransfer",
 		RcloneBinary:          "rclone",
-		MaxParallelJobs:       2,
 		HealthIntervalSeconds: 30,
 		LogLevel:              "info",
 	}
@@ -84,6 +89,14 @@ func Load(path string) (*Config, error) {
 
 	c.applyEnv()
 
+	const unused = "has no effect and will be removed: the limit is max_parallel_jobs in the policy file"
+	if c.DeprecatedMaxParallelJobs != nil {
+		c.Warnings = append(c.Warnings, "max_parallel_jobs in the worker configuration "+unused)
+	}
+	if os.Getenv("TRAILTRANSFER_MAX_PARALLEL_JOBS") != "" {
+		c.Warnings = append(c.Warnings, "TRAILTRANSFER_MAX_PARALLEL_JOBS "+unused)
+	}
+
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
@@ -103,7 +116,6 @@ func (c *Config) applyEnv() {
 	setStr(&c.RcloneBinary, "TRAILTRANSFER_RCLONE_BINARY")
 	setStr(&c.EvidenceJournal, "TRAILTRANSFER_EVIDENCE_JOURNAL")
 	setStr(&c.SigningKey, "TRAILTRANSFER_SIGNING_KEY")
-	setInt(&c.MaxParallelJobs, "TRAILTRANSFER_MAX_PARALLEL_JOBS")
 	setInt(&c.HealthIntervalSeconds, "TRAILTRANSFER_HEALTH_INTERVAL_SECONDS")
 	setStr(&c.LogLevel, "TRAILTRANSFER_LOG_LEVEL")
 }

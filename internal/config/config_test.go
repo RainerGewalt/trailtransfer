@@ -62,3 +62,26 @@ func TestEnvironmentOverridesTheFile(t *testing.T) {
 		t.Fatalf("environment not applied: %+v", c)
 	}
 }
+
+// max_parallel_jobs in the worker configuration never had an effect; the
+// limit is the policy's. Files and environments that still carry it must
+// keep loading, and the worker must say that the value is unused.
+func TestMaxParallelJobsInTheWorkerConfigIsAcceptedAndReported(t *testing.T) {
+	t.Setenv("TRAILTRANSFER_MAX_PARALLEL_JOBS", "")
+	c, err := Load(writeConfig(t, minimal))
+	if err != nil || len(c.Warnings) != 0 {
+		t.Fatalf("a config without the key: err %v, warnings %v", err, c.Warnings)
+	}
+	c, err = Load(writeConfig(t, minimal+"max_parallel_jobs: 8\n"))
+	if err != nil {
+		t.Fatalf("an existing config with max_parallel_jobs must keep loading: %v", err)
+	}
+	if len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "max_parallel_jobs in the worker configuration") {
+		t.Fatalf("want one warning about the file key, got %v", c.Warnings)
+	}
+	t.Setenv("TRAILTRANSFER_MAX_PARALLEL_JOBS", "8")
+	c, err = Load(writeConfig(t, minimal))
+	if err != nil || len(c.Warnings) != 1 || !strings.Contains(c.Warnings[0], "TRAILTRANSFER_MAX_PARALLEL_JOBS") {
+		t.Fatalf("want one warning about the variable, got err %v, warnings %v", err, c.Warnings)
+	}
+}

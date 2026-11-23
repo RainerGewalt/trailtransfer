@@ -235,6 +235,11 @@ trailtransfer verify --pubkey worker-01.pub /data/evidence/journal.jsonl
 # OK: 42 record(s), 3 restart(s), 42 signature(s) verified
 ```
 
+`keygen` does not overwrite: if `worker-01.key` or `worker-01.pub` exists, it
+stops and writes nothing. Journals signed with a key can only be checked
+with its public half, so replacing a pair is a deliberate step with a new
+name.
+
 Keep the private key on the worker (or in an HSM/KMS in production) and
 distribute only the public key to reviewers. `key_id` is a short digest of
 the public key; key rotation and revocation are operator processes that this
