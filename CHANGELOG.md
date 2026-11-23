@@ -7,8 +7,11 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Restart safety (#1). No new commands and no new configuration; everything
-below needs `evidence_journal`.
+## [0.1.3] - 2026-11-23
+
+Restart safety (#1) and the supply-chain findings of the internal review of
+8 November 2026. No new commands and no new configuration. The restart
+behaviour under "Fixed" needs `evidence_journal`.
 
 ### Security
 
@@ -334,7 +337,8 @@ First release of TrailTransfer, the Go successor of FileFlux.
   trusted time and key management remain operator responsibilities. No GxP,
   Part 11 or certification claim is made.
 
-[Unreleased]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/RainerGewalt/trailtransfer/releases/tag/v0.1.0

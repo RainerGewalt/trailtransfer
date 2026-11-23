@@ -33,9 +33,8 @@ production readiness. What a journal shows today, level by level:
   finishes while it runs. The record holds the command hash, the policy, the
   decision, whether it was a dry run, the rclone exit code and rclone's
   counters.
-- **It survived a crash or restart:** with a journal, from the release
-  after 0.1.2 on. A job that was running when the worker stopped is
-  sealed once as `transfer.job.interrupted`, a `job_id` that has an outcome
+- **It survived a crash or restart:** with a journal, from 0.1.3 on.
+  A job that was running when the worker stopped is sealed once as `transfer.job.interrupted`, a `job_id` that has an outcome
   is refused after a restart as before it, and a result sealed while the
   broker was away is published afterwards. An interrupted record says that
   the worker did not see the job to its end; it does not say what rclone had
@@ -104,13 +103,13 @@ manager · an enterprise MFT suite · a cloud service.
 
 - **Container image** for linux/amd64 and linux/arm64, with rclone 1.68
   inside, running as `nonroot`:
-  `docker pull ghcr.io/rainergewalt/trailtransfer:0.1.2`. Mount config,
+  `docker pull ghcr.io/rainergewalt/trailtransfer:0.1.3`. Mount config,
   policy and `rclone.conf` under `/config` as `docker-compose.yaml` does.
 - **Go 1.26 or newer:**
   `go install github.com/RainerGewalt/trailtransfer/cmd/trailtransfer@latest`.
   Transfer jobs need `rclone` on the `PATH`; without it the worker starts,
   reports `rclone_available: false` and fails transfer jobs. A binary built
-  this way reports the module version, for example `0.1.2`.
+  this way reports the module version, for example `0.1.3`.
 - **From a clone:** `make build`, or `go build ./cmd/trailtransfer`.
 
 The GitHub release has no prebuilt binaries yet.
@@ -347,9 +346,14 @@ make first-use        # README and Quickstart from a fresh clone, see docs/TESTI
   `allow_delete`, policy and config are read strictly), only safe `job_id`s,
   records that say what happened (dry runs, size limit, journal errors), and
   `verify` that names what it does not check.
+- **v0.1.3** *(released 2026-11-23)* — restart safety (#1): a job that was
+  running when the worker stopped is sealed once as
+  `transfer.job.interrupted`, a `job_id` with an outcome stays refused after
+  a restart, and sealed results are published after a broker outage;
+  `keygen` no longer overwrites keys, the demo ports are local only, and
+  base images are pinned by digest.
 - **0.2.0** ([milestone](https://github.com/RainerGewalt/trailtransfer/milestone/1))
-  — survive crashes with durable job state, deduplication and an MQTT outbox
-  (#1); a per-file transfer manifest as its own evidence record (#2); a
+  — a per-file transfer manifest as its own evidence record (#2); a
   public end-to-end demo between simulated systems with verification (#3);
   format 0.2 of trail-evidence (#4).
 - **later** — RFC 3161 timestamps, WORM export, retries.
