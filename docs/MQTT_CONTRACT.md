@@ -59,10 +59,10 @@ command that finds the queue full is dropped and logged as an error.
   "target_status": "failed", "worker_id": "worker-01", "timestamp": "…" }
 ```
 
-`target_status` is the queried job's last known status in this worker
-process: `accepted`, `started`, `completed`, `failed`, `cancelled`,
-`rejected`, or `unknown` for a `job_id` the process has not handled. It is
-lost on restart.
+`target_status` is the queried job's last known status: `accepted`,
+`started`, `completed`, `failed`, `cancelled`, `interrupted`, `rejected`, or
+`unknown` for a `job_id` the worker has no outcome for. With a journal the
+outcomes survive a restart; without one they are lost with the process.
 
 ## Job lifecycle
 
@@ -101,8 +101,13 @@ into the worker's hash chain:
   chain_restart?, anchor_hash?, signature? }
 ```
 
-`event_type` is `transfer.job.result` for completed, failed and cancelled jobs
-and `transfer.job.rejected` for jobs refused by schema or policy. The `payload`
+`event_type` is `transfer.job.result` for completed, failed and cancelled jobs,
+`transfer.job.rejected` for jobs refused by schema or policy, and
+`transfer.job.interrupted` (status `interrupted`, reason `worker_shutdown` or
+`worker_restart`) for a job the worker did not see to its end. With a journal,
+records are published from it in journal order, at least once: the same record
+can arrive twice with the same `seq` and `chain_hash`, also after a broker
+outage or a restart. The `payload`
 carries the audit fields `command_hash`, `policy_version`, `policy_hash`,
 `worker_version`, `rclone_exit_code`, `status`, counters, for a job that ran
 `dry_run` and, under a size limit, `max_file_size_mb`, and (for rejections)

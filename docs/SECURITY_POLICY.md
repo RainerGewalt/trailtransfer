@@ -31,8 +31,8 @@ surface is the **incoming MQTT commands**, treated as untrusted.
   by default.
 - The policy and the config file are read strictly: an unknown key is an
   error.
-- `job_id` dedupe while the worker runs (lost on restart, see
-  [#1](https://github.com/RainerGewalt/trailtransfer/issues/1)).
+- `job_id` dedupe, with a journal also across restarts; an interrupted job
+  is sealed and never run again under its `job_id`.
 - `context` cancellation for `cancel`; the policy's `max_parallel_jobs` bounds
   concurrency.
 - Credentials live only in an operator-provided, read-only `rclone.conf`; the

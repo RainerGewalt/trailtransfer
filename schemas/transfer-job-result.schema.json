@@ -9,7 +9,7 @@
       "type": "object",
       "required": ["job_id"],
       "properties": {
-        "event_type": { "type": "string", "enum": ["transfer.job.result", "transfer.job.rejected"] },
+        "event_type": { "type": "string", "enum": ["transfer.job.result", "transfer.job.rejected", "transfer.job.interrupted"] },
         "producer": { "type": "object", "properties": { "kind": { "const": "transfer-worker" } } },
         "policy": { "type": "object", "properties": { "kind": { "const": "transfer-policy" } } },
         "job_id": { "type": "string", "minLength": 1 },
@@ -24,7 +24,7 @@
             "action": { "type": "string", "enum": ["copy", "move", "sync", "check"] },
             "source": { "type": "string" },
             "target": { "type": "string" },
-            "status": { "type": "string", "enum": ["completed", "failed", "cancelled", "rejected"] },
+            "status": { "type": "string", "enum": ["completed", "failed", "cancelled", "interrupted", "rejected"] },
             "reason": { "type": "string", "description": "Machine reason for rejected/failed, e.g. policy_violation." },
             "detail": { "type": "string" },
             "justification": { "type": "string", "description": "Human 'why', from command.reason." },
@@ -46,8 +46,15 @@
         }
       },
       "if": { "properties": { "event_type": { "const": "transfer.job.rejected" } } },
-      "then": { "properties": { "payload": { "properties": { "status": { "const": "rejected" }, "reason": { "type": "string", "enum": ["schema_violation", "policy_violation", "duplicate_job_id", "too_many_jobs"] } }, "required": ["reason"] } } },
-      "else": { "properties": { "payload": { "properties": { "status": { "enum": ["completed", "failed", "cancelled"] } } } } }
+      "then": { "properties": { "payload": { "properties": { "status": { "const": "rejected" }, "reason": { "type": "string", "enum": ["schema_violation", "policy_violation", "duplicate_job_id", "too_many_jobs", "state_unavailable", "worker_stopping"] } }, "required": ["reason"] } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "transfer.job.interrupted" } } },
+      "then": { "properties": { "payload": { "properties": { "status": { "const": "interrupted" }, "reason": { "type": "string", "enum": ["worker_shutdown", "worker_restart"] } }, "required": ["reason"] } } }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "transfer.job.result" } } },
+      "then": { "properties": { "payload": { "properties": { "status": { "enum": ["completed", "failed", "cancelled"] } } } } }
     }
   ]
 }

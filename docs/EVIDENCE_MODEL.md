@@ -34,16 +34,24 @@ by `verify`.
 
 ## What gets a record
 
-A record is written for every job the worker finishes while it runs:
-completed, failed and cancelled jobs (`transfer.job.result`) and jobs refused
-by the schema or the policy (`transfer.job.rejected`). There is no record in
-these cases:
+A record is written for every job the worker handles: completed, failed and
+cancelled jobs (`transfer.job.result`), jobs refused by the schema or the
+policy (`transfer.job.rejected`), and, with a journal, jobs the worker did
+not see to their end (`transfer.job.interrupted`): ended by a shutdown
+(`reason: worker_shutdown`), or found unfinished by the next start after a
+crash, a kill or a power loss (`reason: worker_restart`).
+
+An interrupted record is evidence that the job was admitted and that the
+worker has no outcome for it. It is not evidence of what rclone did: all,
+some or none of the files can be at the target, and for `move` and `sync`
+files can be gone from the source or the target. Its counters hold the last
+progress the worker saw (zero when the record is sealed by a later start)
+and are not a count of what arrived. There is no record in these cases:
 
 - a command without a `job_id`, or with one that is not 1 to 128 characters
   from `A-Z a-z 0-9 . _ -`: it has no topic to be answered on and is logged
   and dropped;
-- a job that is still running when the worker stops (durable job state is
-  planned in [#1](https://github.com/RainerGewalt/trailtransfer/issues/1));
+- a job that is still running when a worker without a journal stops;
 - an outcome that cannot be written to the journal: the worker then
   publishes nothing unsealed, logs the error, reports `unhealthy` and refuses
   every further job until it is restarted, so the gap is visible instead of
@@ -82,7 +90,7 @@ Status queries and cancel commands are control actions and are not sealed.
 | `stream_id` | `worker_id`; one worker is one stream |
 | `seq` | 0 for the first record of a stream, then +1 per record |
 | `prev_hash` | `chain_hash` of the previous record; all zeros (genesis) for the first |
-| `event_type` | `transfer.job.result` for completed, failed and cancelled jobs; `transfer.job.rejected` for jobs turned away by schema or policy |
+| `event_type` | `transfer.job.result` for completed, failed and cancelled jobs; `transfer.job.rejected` for jobs turned away by schema or policy; `transfer.job.interrupted` for jobs the worker did not see to their end |
 | `time` | `recorded_at` = sealing time in RFC 3339 UTC; `source` = `system` |
 | `actor` | `auth` `self-declared` with `id` = the command's `operator`, or `auth` `none` |
 | `policy` | `id` = `policy_id` from the config (default: the policy file name), `version` = `policy_version`, `hash` = SHA-256 of the policy file bytes, `kind` `transfer-policy` |

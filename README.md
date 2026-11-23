@@ -33,9 +33,14 @@ production readiness. What a journal shows today, level by level:
   finishes while it runs. The record holds the command hash, the policy, the
   decision, whether it was a dry run, the rclone exit code and rclone's
   counters.
-- **It survived a crash or restart:** not yet. A job running when the worker
-  stops leaves no record, and the duplicate check starts empty after a
-  restart ([#1](https://github.com/RainerGewalt/trailtransfer/issues/1)).
+- **It survived a crash or restart:** with a journal, from the release
+  after 0.1.2 on. A job that was running when the worker stopped is
+  sealed once as `transfer.job.interrupted`, a `job_id` that has an outcome
+  is refused after a restart as before it, and a result sealed while the
+  broker was away is published afterwards. An interrupted record says that
+  the worker did not see the job to its end; it does not say what rclone had
+  already written ([#1](https://github.com/RainerGewalt/trailtransfer/issues/1),
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md), "Restart and recovery").
 - **The file bytes arrived intact:** not shown. The journal holds no per-file
   manifest ([#2](https://github.com/RainerGewalt/trailtransfer/issues/2)).
 
@@ -294,8 +299,8 @@ may publish to the command topic is decided by the broker's authentication
 and ACLs. No shell execution, no arbitrary rclone flags, no source or target
 outside the allowlist in any spelling. rclone error lines pass a pattern
 filter for credentials, which is not a guarantee for every format. A repeated
-`job_id` is refused while the worker runs; after a restart the same command
-runs again ([#1](https://github.com/RainerGewalt/trailtransfer/issues/1)).
+`job_id` is refused, with a journal also after a restart: no job runs twice
+under one `job_id`, and an interrupted job is not resumed.
 The policy's `max_parallel_jobs` bounds concurrency; a JCS hash chain
 (`content_hash`/`chain_hash`) links every outcome to the one before it.
 

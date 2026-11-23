@@ -2,6 +2,7 @@ package events
 
 import (
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	"github.com/RainerGewalt/trailtransfer/internal/config"
@@ -21,7 +22,12 @@ type Publisher struct {
 	cfg    *config.Config
 	ver    string
 	sealer *evidence.Sealer
+	outbox *Outbox
 }
+
+// SetOutbox routes sealed records through the journal-backed outbox instead
+// of publishing them directly. Call it before the first job is handled.
+func (p *Publisher) SetOutbox(o *Outbox) { p.outbox = o }
 
 // NewPublisher builds a publisher bound to a client, config, worker version and
 // the evidence sealer used to chain-link and journal result records.
@@ -77,7 +83,9 @@ func (p *Publisher) Log(jobID, level, msg string) {
 // actor records who caused it.
 //
 // If the result cannot be sealed, nothing is published and the error is
-// returned: a result travels only as a sealed record.
+// returned: a result travels only as a sealed record. With an outbox the
+// record is published from the journal, also after a broker outage or a
+// restart; without one (no journal) it is published once, directly.
 func (p *Publisher) Result(r ResultEvent, actor *evidence.Actor) error {
 	r.EventType = TypeResult
 	r.WorkerID = p.cfg.WorkerID
@@ -86,15 +94,46 @@ func (p *Publisher) Result(r ResultEvent, actor *evidence.Actor) error {
 		r.Errors = []string{}
 	}
 	eventType := EvidenceJobResult
-	if r.Status == "rejected" {
+	switch r.Status {
+	case "rejected":
 		eventType = EvidenceJobRejected
+	case StatusInterrupted:
+		eventType = EvidenceJobInterrupted
 	}
 	rec, err := p.sealer.Seal(eventType, r.JobID, r, actor)
 	if err != nil {
 		return err
 	}
-	_ = p.mq.Publish(p.cfg.JobResultTopic(r.JobID), 1, false, rec)
+	if p.outbox != nil {
+		p.outbox.Notify()
+		return nil
+	}
+	// No journal, so no outbox: the record exists only in this process.
+	// Keep trying while the broker is away, so that an outage does not
+	// lose it as long as the worker runs.
+	topic := p.cfg.JobResultTopic(r.JobID)
+	if err := p.mq.Publish(topic, 1, false, rec); err != nil {
+		go p.retryResult(topic, r.JobID, rec)
+	}
 	return nil
+}
+
+// resultRetryInterval and resultRetryFor bound the retries of a result that
+// has no journal behind it.
+var (
+	resultRetryInterval = 2 * time.Second
+	resultRetryFor      = 30 * time.Minute
+)
+
+func (p *Publisher) retryResult(topic, jobID string, rec []byte) {
+	deadline := time.Now().Add(resultRetryFor)
+	for time.Now().Before(deadline) {
+		time.Sleep(resultRetryInterval)
+		if p.mq.Publish(topic, 1, false, rec) == nil {
+			return
+		}
+	}
+	slog.Error("result not published: no broker confirmation, and without evidence_journal the record is not kept", "job_id", jobID, "tried_for", resultRetryFor.String())
 }
 
 // EvidenceErr returns the journal write error that stopped sealing, or nil.
