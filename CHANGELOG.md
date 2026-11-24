@@ -7,6 +7,18 @@ and this project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-24
+
+### Security
+
+- `github.com/gorilla/websocket` moves from v1.5.3 to the upstream commit
+  that fixes GO-2026-6278 (GHSA-w67g-5rqw-f597, a weak random source for
+  the WebSocket mask key). The module is an indirect dependency of the MQTT
+  client. The worker connects to the broker over `tcp://` only and does not
+  open a WebSocket; `govulncheck` reports the code as reachable through the
+  client library, so the dependency is updated. No other change since
+  0.1.3.
+
 ## [0.1.3] - 2026-11-23
 
 Restart safety (#1) and the supply-chain findings of the internal review of
@@ -337,7 +349,8 @@ First release of TrailTransfer, the Go successor of FileFlux.
   trusted time and key management remain operator responsibilities. No GxP,
   Part 11 or certification claim is made.
 
-[Unreleased]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/RainerGewalt/trailtransfer/compare/v0.1.0...v0.1.1

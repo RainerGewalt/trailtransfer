@@ -4,7 +4,7 @@ TrailTransfer moves files on edge and IIoT systems on commands it receives
 over MQTT. Those commands are its threat surface, and the design treats them
 as untrusted. This page says what the worker does about each threat, which
 test shows it, and where the protection ends. It describes release
-0.1.3; an earlier release lacks the protections that
+0.1.4; an earlier release lacks the protections that
 [`CHANGELOG.md`](CHANGELOG.md) lists for the versions after it.
 
 ## Who can send commands

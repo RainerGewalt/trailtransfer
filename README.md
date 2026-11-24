@@ -103,13 +103,13 @@ manager · an enterprise MFT suite · a cloud service.
 
 - **Container image** for linux/amd64 and linux/arm64, with rclone 1.68
   inside, running as `nonroot`:
-  `docker pull ghcr.io/rainergewalt/trailtransfer:0.1.3`. Mount config,
+  `docker pull ghcr.io/rainergewalt/trailtransfer:0.1.4`. Mount config,
   policy and `rclone.conf` under `/config` as `docker-compose.yaml` does.
 - **Go 1.26 or newer:**
   `go install github.com/RainerGewalt/trailtransfer/cmd/trailtransfer@latest`.
   Transfer jobs need `rclone` on the `PATH`; without it the worker starts,
   reports `rclone_available: false` and fails transfer jobs. A binary built
-  this way reports the module version, for example `0.1.3`.
+  this way reports the module version, for example `0.1.4`.
 - **From a clone:** `make build`, or `go build ./cmd/trailtransfer`.
 
 The GitHub release has no prebuilt binaries yet.
@@ -352,6 +352,8 @@ make first-use        # README and Quickstart from a fresh clone, see docs/TESTI
   a restart, and sealed results are published after a broker outage;
   `keygen` no longer overwrites keys, the demo ports are local only, and
   base images are pinned by digest.
+- **v0.1.4** *(released 2026-11-24)* — a dependency update
+  (`gorilla/websocket`, GO-2026-6278); nothing else changed.
 - **0.2.0** ([milestone](https://github.com/RainerGewalt/trailtransfer/milestone/1))
   — a per-file transfer manifest as its own evidence record (#2); a
   public end-to-end demo between simulated systems with verification (#3);
