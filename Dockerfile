@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
     -o /out/trailtransfer ./cmd/trailtransfer
 
 # ---- rclone (pinned) — the transfer engine, called as a subprocess ----
-FROM rclone/rclone:1.68@sha256:74c51b8817e5431bd6d7ed27cb2a50d8ee78d77f6807b72a41ef6f898845942b AS rclone
+FROM rclone/rclone:1.76@sha256:7cbeec24a44f206067597c0368be4de90ae19a64d5113c7d1938bd737a81e466 AS rclone
 
 # ---- runtime ----
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
